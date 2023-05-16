@@ -1,0 +1,22 @@
+[
+  {
+    "EventName": "BR_COND_MIS_PRED",
+    "EventCode": "0x000006",
+    "BriefDescription": "Conditional branch mispredict"
+  },
+  {
+    "EventName": "BR_INDIRECT_MIS_PRED",
+    "EventCode": "0x000008",
+    "BriefDescription": "Indirect branch mispredict"
+  },
+  {
+    "EventName": "BR_INDIRECT_INST",
+    "EventCode": "0x000009",
+    "BriefDescription": "Indirect branch instruction"
+  },
+  {
+    "EventName": "INST_STORE",
+    "EventCode": "0x00000b",
+    "BriefDescription": "Store instruction retired"
+  }
+]

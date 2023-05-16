@@ -1,0 +1,42 @@
+[
+  {
+    "EventName": "LSU_SPEC_FAIL",
+    "EventCode": "0x00000a",
+    "BriefDescription": "LSU Spec Fail"
+  },
+  {
+    "EventName": "RF_LAUNCH_FAIL",
+    "EventCode": "0x000014",
+    "BriefDescription": "Register file launch fail"
+  },
+  {
+    "EventName": "RF_REG_LAUNCH",
+    "EventCode": "0x000015",
+    "BriefDescription": "Register file reg launch"
+  },
+  {
+    "EventName": "RF_INSTRUCTION",
+    "EventCode": "0x000016",
+    "BriefDescription": "Register file instruction"
+  },
+  {
+    "EventName": "LSU_STALL_CROSS_4K",
+    "EventCode": "0x000017",
+    "BriefDescription": "LSU stall with cross 4K access"
+  },
+  {
+    "EventName": "LSU_STALL_OTHER",
+    "EventCode": "0x000018",
+    "BriefDescription": "LSU stall with other events"
+  },
+  {
+    "EventName": "LSU_SQ_DISCARD",
+    "EventCode": "0x000019",
+    "BriefDescription": "LSU SQ discard"
+  },
+  {
+    "EventName": "LSU_SQ_DISCARD_DATA",
+    "EventCode": "0x00001a",
+    "BriefDescription": "LSU SQ data discard"
+  }
+]

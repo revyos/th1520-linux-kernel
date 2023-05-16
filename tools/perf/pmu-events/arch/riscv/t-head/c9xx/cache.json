@@ -1,0 +1,67 @@
+[
+  {
+    "EventName": "L1_ICACHE_ACCESS",
+    "EventCode": "0x000001",
+    "BriefDescription": "L1 instruction cache access"
+  },
+  {
+    "EventName": "L1_ICACHE_MISS",
+    "EventCode": "0x000002",
+    "BriefDescription": "L1 instruction cache miss"
+  },
+  {
+    "EventName": "INST_TLB_MISS",
+    "EventCode": "0x000003",
+    "BriefDescription": "Instruction TLB (I-UTLB) miss"
+  },
+  {
+    "EventName": "DATA_TLB_MISS",
+    "EventCode": "0x000004",
+    "BriefDescription": "Data TLB (D-UTLB) miss"
+  },
+  {
+    "EventName": "JTLB_MISS",
+    "EventCode": "0x000005",
+    "BriefDescription": "JTLB access miss"
+  },
+  {
+    "EventName": "L1_DCACHE_READ_ACCESS",
+    "EventCode": "0x00000c",
+    "BriefDescription": "L1 data cache read access"
+  },
+  {
+    "EventName": "L1_DCACHE_READ_MISS",
+    "EventCode": "0x00000d",
+    "BriefDescription": "L1 data cache read miss"
+  },
+  {
+    "EventName": "L1_DCACHE_WRITE_ACCESS",
+    "EventCode": "0x00000e",
+    "BriefDescription": "L1 data cache write access"
+  },
+  {
+    "EventName": "L1_DCACHE_WRITE_MISS",
+    "EventCode": "0x00000f",
+    "BriefDescription": "L1 data cache write miss"
+  },
+  {
+    "EventName": "L2_CACHE_READ_ACCESS",
+    "EventCode": "0x000010",
+    "BriefDescription": "L2 cache read access"
+  },
+  {
+    "EventName": "L2_CACHE_READ_MISS",
+    "EventCode": "0x000011",
+    "BriefDescription": "L2 cache read miss"
+  },
+  {
+    "EventName": "L2_CACHE_WRITE_ACCESS",
+    "EventCode": "0x000012",
+    "BriefDescription": "L2 cache write access"
+  },
+  {
+    "EventName": "L2_CACHE_WRITE_MISS",
+    "EventCode": "0x000013",
+    "BriefDescription": "L2 cache write miss"
+  }
+]
