@@ -55,18 +55,13 @@ static char *_get_cpuid(void)
 				goto free;
 		} else if (!strncmp(line, CPUINFO_MARCH, strlen(CPUINFO_MARCH))) {
 			marchid = _get_field(line);
-			if (!marchid)
-				goto free;
 		} else if (!strncmp(line, CPUINFO_MIMP, strlen(CPUINFO_MIMP))) {
 			mimpid = _get_field(line);
-			if (!mimpid)
-				goto free;
-
 			break;
 		}
 	}
 
-	if (!mvendorid || !marchid || !mimpid)
+	if (!mvendorid)
 		goto free;
 
 	if (asprintf(&cpuid, "%s-%s-%s", mvendorid, marchid, mimpid) < 0)
