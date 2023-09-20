@@ -2841,10 +2841,11 @@ void sdhci_send_tuning(struct sdhci_host *host, u32 opcode)
 }
 EXPORT_SYMBOL_GPL(sdhci_send_tuning);
 
-static int __sdhci_execute_tuning(struct sdhci_host *host, u32 opcode)
+int __sdhci_execute_tuning(struct sdhci_host *host, u32 opcode)
 {
 	int i;
 
+	pr_err("DEBUG [%d] %s(): enter", __LINE__, __func__);
 	/*
 	 * Issue opcode repeatedly till Execute Tuning is set to 0 or the number
 	 * of loops reaches tuning loop count.
