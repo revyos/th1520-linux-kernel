@@ -66,7 +66,7 @@ static int thead_dwmac_set_phy_if(struct plat_stmmacenet_data *plat)
 	struct thead_dwmac *dwmac = plat->bsp_priv;
 	u32 phyif;
 
-	switch (plat->interface) {
+	switch (plat->phy_interface) {
 	case PHY_INTERFACE_MODE_MII:
 		phyif = PHY_INTF_MII_GMII;
 		break;
@@ -78,7 +78,7 @@ static int thead_dwmac_set_phy_if(struct plat_stmmacenet_data *plat)
 		break;
 	default:
 		dev_err(dwmac->dev, "unsupported phy interface %d\n",
-			plat->interface);
+			plat->phy_interface);
 		return -EINVAL;
 	};
 
@@ -92,7 +92,7 @@ static int thead_dwmac_set_txclk_dir(struct plat_stmmacenet_data *plat)
 	struct thead_dwmac *dwmac = plat->bsp_priv;
 	u32 txclk_dir;
 
-	switch (plat->interface) {
+	switch (plat->phy_interface) {
 	case PHY_INTERFACE_MODE_MII:
 		txclk_dir = TXCLK_DIR_INPUT;
 		break;
@@ -104,7 +104,7 @@ static int thead_dwmac_set_txclk_dir(struct plat_stmmacenet_data *plat)
 		break;
 	default:
 		dev_err(dwmac->dev, "unsupported phy interface %d\n",
-			plat->interface);
+			plat->phy_interface);
 		return -EINVAL;
 	};
 
@@ -120,7 +120,7 @@ static void thead_dwmac_fix_speed(void *priv, unsigned int speed, unsigned int m
 	unsigned long rate;
 	u32 div;
 
-	switch (plat->interface) {
+	switch (plat->phy_interface) {
 	/* For MII, rxc/txc is provided by phy */
 	case PHY_INTERFACE_MODE_MII:
 		return;
@@ -160,7 +160,7 @@ static void thead_dwmac_fix_speed(void *priv, unsigned int speed, unsigned int m
 		break;
 	default:
 		dev_err(dwmac->dev, "unsupported phy interface %d\n",
-			plat->interface);
+			plat->phy_interface);
 		return;
 	}
 }
@@ -170,7 +170,7 @@ static int thead_dwmac_enable_clk(struct plat_stmmacenet_data *plat)
 	struct thead_dwmac *dwmac = plat->bsp_priv;
 	u32 reg;
 
-	switch (plat->interface) {
+	switch (plat->phy_interface) {
 	case PHY_INTERFACE_MODE_MII:
 		reg = GMAC_RX_CLK_EN | GMAC_TX_CLK_EN;
 		break;
@@ -188,7 +188,7 @@ static int thead_dwmac_enable_clk(struct plat_stmmacenet_data *plat)
 
 	default:
 		dev_err(dwmac->dev, "unsupported phy interface %d\n",
-			plat->interface);
+			plat->phy_interface);
 		return -EINVAL;
 	}
 
