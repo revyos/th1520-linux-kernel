@@ -133,6 +133,10 @@
 	};
 };
 
+&pvt {
+	status = "okay";
+};
+
 &pwm {
 	status = "okay";
 };
