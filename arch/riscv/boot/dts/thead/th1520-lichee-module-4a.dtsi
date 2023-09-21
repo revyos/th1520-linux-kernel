@@ -45,6 +45,10 @@
 	clock-frequency = <100000000>;
 };
 
+&aonsys_clk {
+	clock-frequency = <73728000>;
+};
+
 &dmac0 {
 	status = "okay";
 };
