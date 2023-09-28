@@ -18479,6 +18479,7 @@ L:	linux-riscv@lists.infradead.org
 S:	Maintained
 F:	arch/riscv/boot/dts/thead/
 F:	drivers/usb/dwc3/dwc3-thead.c
+F:	drivers/pwm/pwm-thead.c
 
 RNBD BLOCK DRIVERS
 M:	Md. Haris Iqbal <haris.iqbal@ionos.com>
