@@ -267,6 +267,7 @@ static const struct of_device_id thead_pwm_dt_ids[] = {
 	{.compatible = "thead,th1520-pwm",},
 	{/* sentinel */}
 };
+MODULE_DEVICE_TABLE(of, thead_pwm_dt_ids);
 
 static const struct dev_pm_ops thead_pwm_pm_ops = {
 	SET_RUNTIME_PM_OPS(thead_pwm_runtime_suspend, thead_pwm_runtime_resume, NULL)
