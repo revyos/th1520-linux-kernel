@@ -108,6 +108,24 @@
 		enable-active-high;
 		regulator-always-on;
 	};
+
+	wcn_wifi: wireless-wlan {
+		compatible = "wlan-platdata";
+		clock-names = "clk_wifi";
+		ref-clock-frequency = <24000000>;
+		keep_wifi_power_on;
+		pinctrl-names = "default";
+		wifi_chip_type = "rtl8723ds";
+		WIFI,poweren_gpio = <&pca9557_1 5 0>;
+		status = "okay";
+	};
+
+	wcn_bt: wireless-bluetooth {
+		compatible = "bluetooth-platdata";
+		pinctrl-names = "default", "rts_gpio";
+		BT,power_gpio    = <&pca9557_1 6 0>;
+		status = "okay";
+	};
 };
 
 &mdio0 {
@@ -135,6 +153,21 @@
 
 &uart0 {
 	status = "okay";
+};
+
+&i2c1 {
+	clock-frequency = <100000>;
+	i2c-sda-hold-time-ns = <300>;
+	i2c-sda-falling-time-ns = <510>;
+	i2c-scl-falling-time-ns = <510>;
+	status = "okay";
+
+	pca9557_1: gpio@18 {
+		compatible = "nxp,pca9557";
+		reg = <0x18>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
 };
 
 &i2c3 {
