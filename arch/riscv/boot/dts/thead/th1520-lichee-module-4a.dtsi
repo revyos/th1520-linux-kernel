@@ -68,3 +68,27 @@
 	bus-width = <4>;
 	status = "okay";
 };
+
+&sdhci0 {
+	bus-width = <4>;
+	max-frequency = <198000000>;
+	thead,phy-pull-up;
+	wprtn_ignore;
+	status = "okay";
+};
+
+&sdhci1 {
+	bus-width = <4>;
+	max-frequency = <100000000>;
+	thead,phy-pull-up;
+	no-sd;
+	no-mmc;
+	non-removable;
+	thead,io-fixed-1v8;
+	post-power-on-delay-ms = <50>;
+	wprtn_ignore;
+	cap-sd-highspeed;
+	keep-power-in-suspend;
+	wakeup-source;
+	status = "okay";
+};
