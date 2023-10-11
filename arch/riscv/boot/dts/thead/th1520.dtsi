@@ -522,6 +522,24 @@
 			clock-names = "core";
 			status = "disabled";
 		};
+		
+		sdhci0: sd@ffe7090000 {
+			compatible = "thead,th1520-dwcmshc";
+			reg = <0xff 0xe7090000 0x0 0x10000>;
+			interrupts = <64 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "sdhci0irq";
+			clocks = <&sdhci_clk>;
+			clock-names = "core";
+		};
+
+		sdhci1: sd@ffe70a0000 {
+		        compatible = "thead,th1520-dwcmshc";
+		        reg = <0xff 0xe70a0000 0x0 0x10000>;
+		        interrupts = <71 IRQ_TYPE_LEVEL_HIGH>;
+		        interrupt-names = "sdhci1irq";
+		        clocks = <&sdhci_clk>;
+		        clock-names = "core";
+		};
 
 		timer0: timer@ffefc32000 {
 			compatible = "snps,dw-apb-timer";
