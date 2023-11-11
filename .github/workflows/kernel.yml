@@ -1,0 +1,112 @@
+name: revyos-mainline-kernel-build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+env:
+  xuantie_toolchain: https://occ-oss-prod.oss-cn-hangzhou.aliyuncs.com/resource//1698113812618
+  toolchain_file_name: Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.8.0-20231018.tar.gz
+  mainline_toolchain: https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2023.10.18
+  mainline_toolchain_file_name: riscv64-glibc-ubuntu-22.04-gcc-nightly-2023.10.18-nightly.tar.gz
+  wget_alias: 'wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 0'
+  ARCH: riscv
+  board: lpi4a
+  KBUILD_BUILD_USER: builder
+  KBUILD_BUILD_HOST: revyos-riscv-builder
+  KDEB_COMPRESS: xz
+  KDEB_CHANGELOG_DIST: unstable
+
+jobs:
+  kernel:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: thead-gcc
+          - name: gcc-13
+
+    runs-on: ubuntu-22.04
+    env:
+      CROSS_COMPILE: riscv64-unknown-linux-gnu-
+
+    steps:
+      - name: "Update APT sources"
+        run: |
+          sudo apt update
+
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed,
+          # if set to "true" but frees about 6 GB
+          tool-cache: true
+          # all of these default to true, but feel free to set to
+          # "false" if necessary for your workflow
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Install software
+        run: |
+              sudo apt install -y gdisk dosfstools g++-12-riscv64-linux-gnu build-essential \
+                                  libncurses-dev gawk flex bison openssl libssl-dev tree \
+                                  dkms libelf-dev libudev-dev libpci-dev libiberty-dev autoconf device-tree-compiler \
+                                  devscripts debhelper pahole
+
+      - name: Checkout kernel
+        uses: actions/checkout@v4
+        with:
+            path: 'kernel'
+
+      - name: Compile Kernel && Install
+        run: |
+              mkdir -p rootfs/boot
+              if [[ ${{ matrix.name }} = "thead-gcc" ]]; then
+                ${wget_alias} ${xuantie_toolchain}/${toolchain_file_name}
+                tar -xvf ${toolchain_file_name} -C /opt
+                export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.8.0/bin:$PATH"
+              else
+                ${wget_alias} ${mainline_toolchain}/${mainline_toolchain_file_name}
+                tar -xvf ${mainline_toolchain_file_name} -C /opt
+                export PATH="/opt/riscv/bin:$PATH"
+              fi
+              ${CROSS_COMPILE}gcc -v
+
+              pushd kernel
+                make revyos_defconfig
+                export KDEB_PKGVERSION="$(date "+%Y.%m.%d.%H.%M")+$(git rev-parse --short HEAD)"
+                #if [ x"${{ matrix.name }}" = x"gcc-12" ]; then
+                #  echo "CONFIG_THEAD_ISA=n" >> .config
+                #elif [ x"${{ matrix.name }}" = x"thead-gcc" ]; then
+                #  echo "CONFIG_THEAD_ISA=y" >> .config
+                #fi
+                make -j$(nproc) bindeb-pkg LOCALVERSION="-${board}"
+                make -j$(nproc) dtbs
+
+                # Copy deb
+                sudo dcmd cp -v ../*.changes ${GITHUB_WORKSPACE}/rootfs/
+
+                # record commit-id
+                git rev-parse HEAD > kernel-commitid
+                sudo cp -v kernel-commitid ${GITHUB_WORKSPACE}/rootfs/boot
+
+                # Install DTB
+                sudo cp -v arch/riscv/boot/dts/thead/*.dtb ${GITHUB_WORKSPACE}/rootfs/boot/
+              popd
+
+      - name: compress
+        run: tar -zcvf thead-mainline-kernel-${{ matrix.name }}.tar.gz rootfs
+
+      - name: 'Upload Artifact'
+        uses: actions/upload-artifact@v3
+        with:
+          name: thead-mainline-kernel-${{ matrix.name }}.tar.gz
+          path: thead-mainline-kernel-${{ matrix.name }}.tar.gz
+          retention-days: 30
