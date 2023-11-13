@@ -180,7 +180,6 @@ static int thead_pwm_get_state(struct pwm_chip *chip, struct pwm_device *pwm,
 static const struct pwm_ops thead_pwm_ops = {
 	.apply = thead_pwm_apply,
 	.get_state = thead_pwm_get_state,
-	.owner = THIS_MODULE,
 };
 
 static int __maybe_unused thead_pwm_runtime_suspend(struct device *dev)
