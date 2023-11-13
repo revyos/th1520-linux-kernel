@@ -1,2 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
 dtb-$(CONFIG_ARCH_SOPHGO) += sg2042-milkv-pioneer.dtb
+dtb-$(CONFIG_ARCH_SOPHGO) += mango-milkv-pioneer.dtb
+dtb-$(CONFIG_ARCH_SOPHGO) += mango-sophgo-x4evb.dtb
+dtb-$(CONFIG_ARCH_SOPHGO) += mango-sophgo-x8evb.dtb
