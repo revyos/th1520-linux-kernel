@@ -37,7 +37,7 @@
 	};
 };
 
-&osc {
+&osc_24m {
 	clock-frequency = <24000000>;
 };
 
