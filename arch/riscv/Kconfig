@@ -658,6 +658,7 @@ config RISCV_MISALIGNED
 config RISCV_EFFICIENT_UNALIGNED_ACCESS
 	bool "Use unaligned access for some functions"
 	depends on NONPORTABLE
+	select DCACHE_WORD_ACCESS if MMU
 	select HAVE_EFFICIENT_UNALIGNED_ACCESS
 	default n
 	help
