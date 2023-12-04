@@ -500,6 +500,15 @@ config PINCTRL_TPS6594
 	  This driver can also be built as a module
 	  called tps6594-pinctrl.
 
+config PINCTRL_TH1520
+	tristate "Pinctrl driver for the T-Head TH1520 SoC"
+	depends on ARCH_THEAD || COMPILE_TEST
+	select GENERIC_PINMUX_FUNCTIONS
+	select GENERIC_PINCONF
+	select PINMUX
+	help
+	  This selects the pinctrl driver for T-Head TH1520 RISC-V SoC.
+
 config PINCTRL_ZYNQ
 	bool "Pinctrl driver for Xilinx Zynq"
 	depends on ARCH_ZYNQ
