@@ -441,6 +441,7 @@
 &gmac1 {
 	phy-handle = <&phy1>;
 	phy-mode = "rgmii-id";
+	status = "okay";
 };
 
 &uart0 {
