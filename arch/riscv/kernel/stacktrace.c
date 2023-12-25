@@ -17,6 +17,18 @@
 #ifdef CONFIG_FRAME_POINTER
 
 extern asmlinkage void ret_from_exception(void);
+extern asmlinkage void ret_from_irq_exception(void);
+extern asmlinkage void ret_from_other_exception(void);
+
+static inline bool is_exception_frame(unsigned long pc)
+{
+	if ((pc == (unsigned long)ret_from_exception) ||
+	    (pc == (unsigned long)ret_from_irq_exception) ||
+	    (pc == (unsigned long)ret_from_other_exception))
+		return true;
+
+	return false;
+}
 
 void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
 			     bool (*fn)(void *, unsigned long), void *arg)
@@ -62,7 +74,7 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
 			fp = frame->fp;
 			pc = ftrace_graph_ret_addr(current, NULL, frame->ra,
 						   &frame->ra);
-			if (pc == (unsigned long)ret_from_exception) {
+			if (is_exception_frame(pc)) {
 				if (unlikely(!__kernel_text_address(pc) || !fn(arg, pc)))
 					break;
 
