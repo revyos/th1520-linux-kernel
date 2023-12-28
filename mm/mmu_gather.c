@@ -384,7 +384,7 @@ void tlb_finish_mmu(struct mmu_gather *tlb)
 		 * On x86 non-fullmm doesn't yield significant difference
 		 * against fullmm.
 		 */
-		tlb->fullmm = 1;
+		tlb->need_flush_all = 1;
 		__tlb_reset_range(tlb);
 		tlb->freed_tables = 1;
 	}
