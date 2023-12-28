@@ -67,7 +67,10 @@ static inline void tlb_flush(struct mmu_gather *tlb)
 	 * invalidating the walk-cache, since the ASID allocator won't
 	 * reallocate our ASID without invalidating the entire TLB.
 	 */
-	if (tlb->fullmm) {
+	if (tlb->fullmm)
+		return;
+
+	if (tlb->need_flush_all) {
 		if (!last_level)
 			flush_tlb_mm(tlb->mm);
 		return;
