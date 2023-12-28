@@ -30,10 +30,19 @@ static inline void __tlb_remove_table(void *table)
 
 #define tlb_flush tlb_flush
 #include <asm-generic/tlb.h>
+#include <asm/mmu_context.h>
 
 static inline void tlb_flush(struct mmu_gather *tlb)
 {
 #ifdef CONFIG_MMU
+	/*
+	 * If ASID is supported, the ASID allocator will either invalidate the
+	 * ASID or mark it as used. So we can avoid TLB invalidation when
+	 * pulling down a full mm.
+	 */
+	if (static_branch_likely(&use_asid_allocator) && tlb->fullmm)
+		return;
+
 	if (tlb->fullmm || tlb->need_flush_all)
 		flush_tlb_mm(tlb->mm);
 	else
