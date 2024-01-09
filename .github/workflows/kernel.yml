@@ -99,6 +99,12 @@ jobs:
 
                 # Install DTB
                 sudo cp -v arch/riscv/boot/dts/thead/*.dtb ${GITHUB_WORKSPACE}/rootfs/boot/
+
+                # Build & Install perf
+                pushd tools/perf
+                  make LDFLAGS=-static NO_LIBELF=1 NO_LIBTRACEEVENT=1 perf
+                  cp -v perf ${GITHUB_WORKSPACE}/rootfs/perf-th1520
+                popd
               popd
 
       - name: compress
