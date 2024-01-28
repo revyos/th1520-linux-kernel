@@ -119,3 +119,28 @@ void *memcpy(void *dest, const void *src, size_t count) __weak __alias(__memcpy)
 EXPORT_SYMBOL(memcpy);
 void *__pi_memcpy(void *dest, const void *src, size_t count) __alias(__memcpy);
 void *__pi___memcpy(void *dest, const void *src, size_t count) __alias(__memcpy);
+
+/*
+ * Simply check if the buffer overlaps an call memcpy() in case,
+ * otherwise do a simple one byte at time backward copy.
+ */
+void *__memmove(void *dest, const void *src, size_t count)
+{
+	if (dest < src || src + count <= dest)
+		return __memcpy(dest, src, count);
+
+	if (dest > src) {
+		const char *s = src + count;
+		char *tmp = dest + count;
+
+		while (count--)
+			*--tmp = *--s;
+	}
+	return dest;
+}
+EXPORT_SYMBOL(__memmove);
+
+void *memmove(void *dest, const void *src, size_t count) __weak __alias(__memmove);
+EXPORT_SYMBOL(memmove);
+void *__pi_memmove(void *dest, const void *src, size_t count) __alias(__memmove);
+void *__pi___memmove(void *dest, const void *src, size_t count) __alias(__memmove);
