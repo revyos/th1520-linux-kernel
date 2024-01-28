@@ -1,20 +1,20 @@
 # SPDX-License-Identifier: GPL-2.0
 OBJECT_FILES_NON_STANDARD := y
 
-purgatory-y := purgatory.o sha256.o entry.o string.o ctype.o memcpy.o memset.o
-purgatory-y += strcmp.o strlen.o strncmp.o
+purgatory-y := purgatory.o sha256.o entry.o string.o ctype.o memset.o
+purgatory-y += strcmp.o strlen.o strncmp.o riscv_string.o
 
 targets += $(purgatory-y)
 PURGATORY_OBJS = $(addprefix $(obj)/,$(purgatory-y))
+
+$(obj)/riscv_string.o: $(srctree)/arch/riscv/lib/string.c FORCE
+	$(call if_changed_rule,cc_o_c)
 
 $(obj)/string.o: $(srctree)/lib/string.c FORCE
 	$(call if_changed_rule,cc_o_c)
 
 $(obj)/ctype.o: $(srctree)/lib/ctype.c FORCE
 	$(call if_changed_rule,cc_o_c)
-
-$(obj)/memcpy.o: $(srctree)/arch/riscv/lib/memcpy.S FORCE
-	$(call if_changed_rule,as_o_S)
 
 $(obj)/memset.o: $(srctree)/arch/riscv/lib/memset.S FORCE
 	$(call if_changed_rule,as_o_S)
