@@ -6,6 +6,7 @@
  * Copyright (C) 2021 Matteo Croce
  */
 
+#define __NO_FORTIFY
 #include <linux/types.h>
 #include <linux/module.h>
 
