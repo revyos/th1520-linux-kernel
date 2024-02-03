@@ -722,6 +722,19 @@
 	status = "okay";
 };
 
+&sdio1 {
+	bus-width = <4>;
+	max-frequency = <100000000>;
+	no-sd;
+	no-mmc;
+	non-removable;
+	wprtn_ignore;
+	cap-sd-highspeed;
+	keep-power-in-suspend;
+	wakeup-source;
+	status = "okay";
+};
+
 &usb_dwc3 {
 	status = "okay";
 	#address-cells = <1>;
