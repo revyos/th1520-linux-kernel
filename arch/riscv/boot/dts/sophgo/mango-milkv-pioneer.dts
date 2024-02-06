@@ -159,5 +159,5 @@
 };
 
 &chosen {
-	bootargs = "console=ttyS0,115200 console=tty1 earlycon maxcpus=1";
+	bootargs = "console=ttyS0,115200 earlycon maxcpus=1";
 };
