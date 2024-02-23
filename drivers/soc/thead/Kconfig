@@ -3,7 +3,7 @@ menu "Thead SoC drivers"
 
 config LIGHT_REBOOTMODE
 	bool "Thead light rebootmode support"
-	default y
+	default n
 	help
 	 This driver supports check rebootmode feature in Light FM platform
 
