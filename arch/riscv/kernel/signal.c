@@ -86,10 +86,7 @@ static long save_v_state(struct pt_regs *regs, void __user **sc_vec)
 	/* datap is designed to be 16 byte aligned for better performance */
 	WARN_ON(unlikely(!IS_ALIGNED((unsigned long)datap, 16)));
 
-	get_cpu_vector_context();
 	riscv_v_vstate_save(current, regs);
-	put_cpu_vector_context();
-
 	/* Copy everything of vstate but datap. */
 	err = __copy_to_user(&state->v_state, &current->thread.vstate,
 			     offsetof(struct __riscv_v_ext_state, datap));
@@ -124,7 +121,7 @@ static long __restore_v_state(struct pt_regs *regs, void __user *sc_vec)
 	 * to avoid getting the vstate incorrectly clobbered by the
 	 *  discarded vector state.
 	 */
-	riscv_v_vstate_set_restore(current, regs);
+	riscv_v_vstate_restore(current, regs);
 
 	/* Copy everything of __sc_riscv_v_state except datap. */
 	err = __copy_from_user(&current->thread.vstate, &state->v_state,

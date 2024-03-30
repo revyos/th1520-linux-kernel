@@ -99,11 +99,8 @@ static int riscv_vr_get(struct task_struct *target,
 	 * Ensure the vector registers have been saved to the memory before
 	 * copying them to membuf.
 	 */
-	if (target == current) {
-		get_cpu_vector_context();
+	if (target == current)
 		riscv_v_vstate_save(current, task_pt_regs(current));
-		put_cpu_vector_context();
-	}
 
 	ptrace_vstate.vstart = vstate->vstart;
 	ptrace_vstate.vl = vstate->vl;
