@@ -15,4 +15,3 @@ lib-$(CONFIG_RISCV_ISA_ZICBOZ)	+= clear_page.o
 CFLAGS_string.o := -ffreestanding
 
 obj-$(CONFIG_FUNCTION_ERROR_INJECTION) += error-inject.o
-lib-$(CONFIG_RISCV_ISA_V)	+= xor.o
