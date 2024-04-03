@@ -1,0 +1,99 @@
+name: revyos-mainline-kernel-build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+env:
+  xuantie_toolchain: https://occ-oss-prod.oss-cn-hangzhou.aliyuncs.com/resource//1705395627867
+  toolchain_file_name: Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.8.1-20240115.tar.gz
+  mainline_toolchain: https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2024.03.01
+  mainline_toolchain_file_name: riscv64-glibc-ubuntu-22.04-gcc-nightly-2024.03.01-nightly.tar.gz
+  wget_alias: 'wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 0'
+  ARCH: riscv
+  board: th1520
+  KBUILD_BUILD_USER: builder
+  KBUILD_BUILD_HOST: revyos-riscv-builder
+  KDEB_COMPRESS: none
+  KDEB_CHANGELOG_DIST: unstable
+
+jobs:
+  kernel:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: native
+            cross: riscv64-linux-gnu-
+            machine: [ self-hosted, Linux, riscv64 ]
+            run_image: ghcr.io/revyos/revyos-kernel-builder:riscv64-2024.04.02
+
+    runs-on: ${{ matrix.machine }}
+    container:
+      image: ${{ matrix.run_image }}
+    env:
+      CROSS_COMPILE: ${{ matrix.cross }}
+
+    steps:
+      - name: Checkout kernel
+        uses: actions/checkout@v4
+        with:
+            path: 'kernel'
+
+      - name: Compile Kernel && Install
+        run: |
+              mkdir -p output
+              if [[ ${{ matrix.name }} = "thead-gcc" ]]; then
+                ${wget_alias} ${xuantie_toolchain}/${toolchain_file_name}
+                tar -xvf ${toolchain_file_name} -C /opt
+                export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.8.1/bin:$PATH"
+              elif [[ ${{ matrix.name }} = "gcc-13" ]]; then
+                ${wget_alias} ${mainline_toolchain}/${mainline_toolchain_file_name}
+                tar -xvf ${mainline_toolchain_file_name} -C /opt
+                export PATH="/opt/riscv/bin:$PATH"
+              else
+                echo "No download toolchain."
+              fi
+              ${CROSS_COMPILE}gcc -v
+
+              pushd kernel
+                make revyos_defconfig
+                export KDEB_PKGVERSION="$(make kernelversion)-$(date "+%Y.%m.%d.%H.%M")+$(git rev-parse --short HEAD)"
+                if [ `uname -m` = "riscv64" ]; then
+                  # FIXME: force use 32 thread
+                  make -j32 bindeb-pkg LOCALVERSION="-${board}"
+                  make -j32 dtbs
+                else
+                  make -j$(nproc) bindeb-pkg LOCALVERSION="-${board}"
+                  make -j$(nproc) dtbs
+                fi
+
+                # Copy deb
+                sudo dcmd cp -v ../*.changes ${GITHUB_WORKSPACE}/output
+
+                # record commit-id
+                git rev-parse HEAD > kernel-commitid
+                sudo cp -v kernel-commitid ${GITHUB_WORKSPACE}/output
+
+                # Install DTB
+                sudo cp -v arch/riscv/boot/dts/thead/*.dtb ${GITHUB_WORKSPACE}/output
+
+                # Build & Install perf
+                # pushd tools/perf
+                #   make LDFLAGS=-static NO_LIBELF=1 NO_LIBTRACEEVENT=1 perf
+                #   cp -v perf ${GITHUB_WORKSPACE}/output/perf-th1520
+                # popd
+              popd
+
+      - name: compress
+        run: tar -zcvf thead-mainline-kernel-${{ matrix.name }}.tar.gz output
+
+      - name: 'Upload Artifact'
+        uses: actions/upload-artifact@v3
+        with:
+          name: thead-mainline-kernel-${{ matrix.name }}.tar.gz
+          path: thead-mainline-kernel-${{ matrix.name }}.tar.gz
+          retention-days: 30
