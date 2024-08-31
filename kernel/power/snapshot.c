@@ -2872,6 +2872,7 @@ int snapshot_write_next(struct snapshot_handle *handle)
 {
 	static struct chain_allocator ca;
 	int error = 0;
+	ktime_t start;
 
 next:
 	/* Check if we have already loaded the entire image */
@@ -2911,10 +2912,12 @@ next:
 			return error;
 
 		if (handle->cur == nr_meta_pages + 1) {
+			start = ktime_get();
 			error = prepare_image(&orig_bm, &copy_bm, &zero_bm);
 			if (error)
 				return error;
 
+			pr_info("prepare image took %lldms\n",ktime_to_ms( ktime_sub(ktime_get(),start)) );
 			chain_init(&ca, GFP_ATOMIC, PG_SAFE);
 			memory_bm_position_reset(&orig_bm);
 			memory_bm_position_reset(&zero_bm);
