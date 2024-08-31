@@ -2072,6 +2072,7 @@ static int dwc3_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_exit_debugfs;
 
+	device_enable_async_suspend(dev);
 	pm_runtime_put(dev);
 
 	dma_set_max_seg_size(dev, UINT_MAX);
