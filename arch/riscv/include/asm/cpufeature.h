@@ -37,6 +37,7 @@ extern struct riscv_isainfo hart_isa[NR_CPUS];
 
 void check_unaligned_access(int cpu);
 void riscv_user_isa_enable(void);
+extern u32 thead_vlenb_of;
 
 unsigned long riscv_get_elf_hwcap(void);
 
