@@ -232,6 +232,7 @@ static int hc32fx_probe(struct i2c_client *client)
 		return client->irq;
 	}
 
+
 	ret = devm_request_threaded_irq(&client->dev, client->irq, NULL,
 					hc32fx_irq_handler_thread,
 					IRQF_TRIGGER_FALLING | IRQF_ONESHOT, "hc32fx_irq",
@@ -240,6 +241,7 @@ static int hc32fx_probe(struct i2c_client *client)
 		dev_err(&client->dev, "request irq failed\n");
 		goto irq_fail;
 	}
+
 	enable_irq_wake(client->irq);
 
 	register_syscore_ops(&TH1520_syscore_ops);
@@ -248,6 +250,7 @@ static int hc32fx_probe(struct i2c_client *client)
 irq_fail:
 	sysfs_remove_group(&client->dev.kobj, &debug_attr_group);
 	return ret;
+
 }
 
 static struct of_device_id hc32fx_of_match[] = {
