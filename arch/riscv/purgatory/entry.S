@@ -16,6 +16,7 @@
 
 .text
 
+.align  2
 .globl purgatory_start
 purgatory_start:
 
