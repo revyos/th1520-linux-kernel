@@ -32,6 +32,7 @@ struct vs_gem_object {
 	struct drm_gem_object   base;
 	size_t          size;
 	void            *cookie;
+	void            *vaddr;
 	dma_addr_t      dma_addr;
 	u32             iova;
 	unsigned long   dma_attrs;

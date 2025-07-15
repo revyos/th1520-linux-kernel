@@ -378,22 +378,32 @@ struct sg_table *vs_gem_prime_get_sg_table(struct drm_gem_object *obj)
 static int vs_gem_prime_vmap(struct drm_gem_object *obj, struct iosys_map *map)
 {
 	struct vs_gem_object *vs_obj = to_vs_gem_object(obj);
-	void *addr = vs_obj->dma_attrs & DMA_ATTR_NO_KERNEL_MAPPING ?
-					page_address(vs_obj->cookie) : vs_obj->cookie;
+	unsigned int nr_pages;
 
-	if (addr == NULL)
+	if (vs_obj->vaddr)
+		goto out;
+
+	nr_pages = vs_obj->size >> PAGE_SHIFT;
+	vs_obj->vaddr = vmap(vs_obj->pages, nr_pages, VM_MAP,
+			     pgprot_writecombine(PAGE_KERNEL));
+
+	if (!vs_obj->vaddr)
 		return -ENOMEM;
 
-	iosys_map_set_vaddr(map, vs_obj->dma_attrs & DMA_ATTR_NO_KERNEL_MAPPING ?
-						page_address(vs_obj->cookie) :
-						vs_obj->cookie);
-
+out:
+	iosys_map_set_vaddr(map, vs_obj->vaddr);
 	return 0;
 }
 
 static void vs_gem_prime_vunmap(struct drm_gem_object *obj, struct iosys_map *map)
 {
-	/* Nothing to do */
+	struct vs_gem_object *vs_obj = to_vs_gem_object(obj);
+
+	if (!vs_obj->vaddr)
+		return;
+
+	vunmap(vs_obj->vaddr);
+	vs_obj->vaddr = NULL;
 }
 
 static const struct vm_operations_struct vs_vm_ops = {
