@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (C) 2023 Sipeed.
+ */
+
+#include "th1520-lpi4a-cluster.dts"
+
+/ {
+	model = "Sipeed Lichee Pi 4A configuration for 16GB DDR board on Cluster";
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x00000000 0x4 0x00000000>;
+	};
+};
+
+&cmamem {
+	alloc-ranges = <0x3 0xe4000000 0 0x14000000>; // [0x3E400_0000 ~ 0x3F800_0000]
+};
