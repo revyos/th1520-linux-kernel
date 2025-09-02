@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 dtb-$(CONFIG_ARCH_XUANTIE) += th1520-lichee-pi-4a.dtb th1520-beaglev-ahead.dtb th1520-lichee-pi-4a-16g.dtb
+dtb-$(CONFIG_ARCH_XUANTIE) += th1520-lpi4a-cluster.dtb th1520-lpi4a-cluster-16g.dtb
 dtb-$(CONFIG_ARCH_XUANTIE) += th1520-lpi4a-product.dtb th1520-lpi4a-product-sec.dtb th1520-lpi4a-product-crash.dtb
 dtb-$(CONFIG_ARCH_XUANTIE) += th1520-lpi4a-dsi0.dtb th1520-lpi4a-hx8279.dtb
 dtb-$(CONFIG_ARCH_XUANTIE) += th1520-lpi4a-console.dtb th1520-lpi4a-plastic.dtb th1520-lpi4a-plastic-16g.dtb
