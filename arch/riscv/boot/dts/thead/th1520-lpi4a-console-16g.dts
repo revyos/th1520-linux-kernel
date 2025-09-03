@@ -1,0 +1,15 @@
+#include "th1520-lpi4a-console.dts"
+
+/ {
+	model = "Sipeed Lichee Pi 4A configuration for LicheeConsole4A 16G";
+	compatible = "sipeed,th1520-laptop", "sipeed,console4a", "thead,th1520";
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x200000 0x3 0xffe00000>;
+	};
+};
+
+&cmamem {
+	alloc-ranges = <0x3 0xe4000000 0 0x14000000>; // [0x3E400_0000 ~ 0x3F800_0000]
+};
