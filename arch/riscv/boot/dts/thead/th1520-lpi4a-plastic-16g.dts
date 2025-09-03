@@ -1,6 +1,9 @@
 #include "th1520-lpi4a-plastic.dts"
 
 / {
+	model = "Sipeed Lichee Pi 4A configuration for Plastic laptop 16G";
+	compatible = "sipeed,th1520-laptop", "sipeed,book4a", "thead,th1520";
+
 	memory@0 {
 		device_type = "memory";
 		reg = <0x0 0x200000 0x3 0xffe00000>;
