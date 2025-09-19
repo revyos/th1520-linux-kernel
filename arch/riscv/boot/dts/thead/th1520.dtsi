@@ -68,7 +68,7 @@
 			device_type = "cpu";
 			riscv,isa = "rv64imafdc_xtheadvector";
 			riscv,isa-base = "rv64i";
-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicntr", "zicsr",
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "ziccrse", "zicntr", "zicsr",
 					       "zifencei", "zihpm", "xtheadsstc", "xtheadvector";
 			reg = <0>;
 			i-cache-block-size = <64>;
@@ -104,7 +104,7 @@
 			device_type = "cpu";
 			riscv,isa = "rv64imafdc_xtheadvector";
 			riscv,isa-base = "rv64i";
-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicntr", "zicsr",
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "ziccrse", "zicntr", "zicsr",
 					       "zifencei", "zihpm", "xtheadsstc", "xtheadvector";
 			reg = <1>;
 			i-cache-block-size = <64>;
@@ -138,7 +138,7 @@
 			device_type = "cpu";
 			riscv,isa = "rv64imafdc_xtheadvector";
 			riscv,isa-base = "rv64i";
-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicntr", "zicsr",
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "ziccrse", "zicntr", "zicsr",
 					       "zifencei", "zihpm", "xtheadsstc", "xtheadvector";
 			reg = <2>;
 			i-cache-block-size = <64>;
@@ -172,7 +172,7 @@
 			device_type = "cpu";
 			riscv,isa = "rv64imafdc_xtheadvector";
 			riscv,isa-base = "rv64i";
-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicntr", "zicsr",
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "ziccrse", "zicntr", "zicsr",
 					       "zifencei", "zihpm", "xtheadsstc", "xtheadvector";
 			reg = <3>;
 			i-cache-block-size = <64>;
