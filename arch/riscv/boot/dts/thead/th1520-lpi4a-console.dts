@@ -405,16 +405,8 @@
 				sound-dai = <&es8156_audio_codec>;
 			};
 		};
-	};
-
-	th1520_sound_input: soundcard@3 {
-		compatible = "simple-audio-card";
-		simple-audio-card,name = "Mic";
-		#address-cells = <1>;
-		#size-cells = <0>;
-
 		simple-audio-card,dai-link@1 {  /* I2S - AUDIO SYS CODEC 7210*/
-			reg = <0>;
+			reg = <1>;
 			format = "i2s";
 			cpu {
 				sound-dai = <&i2s1 0>;
