@@ -44,15 +44,8 @@
 #if !defined(__PVR_FENCE_H__)
 #define __PVR_FENCE_H__
 
-#include <linux/version.h>
-
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0))
-static inline void pvr_fence_cleanup(void)
-{
-}
-#else
 #include "services_kernel_client.h"
-#include "pvr_linux_fence.h"
+#include <linux/dma-fence.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
@@ -98,7 +91,16 @@ struct pvr_fence_context {
 
 	struct kref kref;
 	struct work_struct destroy_work;
+	void *dev_cookie;
 };
+
+typedef enum {
+	PVR_FENCE_TYPE_NONE = 0,        /* Invalid. */
+	PVR_FENCE_TYPE_RGX,             /* RGX fences created on an RGX device. */
+	PVR_FENCE_TYPE_PROXY_MIRROR,    /* Proxy fences for fences imported from another RGX device. */
+	PVR_FENCE_TYPE_PROXY_SW,        /* Proxy fences for software fences. */
+	PVR_FENCE_TYPE_PROXY_FOREIGN    /* Proxy fences for foreign fences. */
+} pvr_fence_type;
 
 /**
  * pvr_fence - PVR fence that represents both native and foreign fences
@@ -110,6 +112,8 @@ struct pvr_fence_context {
  * @fence_head: entry on the context fence and deferred free list
  * @signal_head: entry on the context signal list
  * @cb: foreign fence callback to set the sync to signalled
+ * @mirror_list_node: list of fences which have mirrored this context.
+ * @type: identifies the type of fence this is.
  */
 struct pvr_fence {
 	struct dma_fence base;
@@ -123,10 +127,9 @@ struct pvr_fence {
 	struct list_head signal_head;
 	struct dma_fence_cb cb;
 	struct rcu_head rcu;
+	struct list_head mirror_list_node;
+	pvr_fence_type type;
 };
-
-extern const struct dma_fence_ops pvr_fence_ops;
-extern const struct dma_fence_ops pvr_fence_foreign_ops;
 
 static inline bool is_our_fence(struct pvr_fence_context *fctx,
 				struct dma_fence *fence)
@@ -134,19 +137,8 @@ static inline bool is_our_fence(struct pvr_fence_context *fctx,
 	return (fence->context == fctx->fence_context);
 }
 
-static inline bool is_pvr_fence(struct dma_fence *fence)
-{
-	return ((fence->ops == &pvr_fence_ops) ||
-		(fence->ops == &pvr_fence_foreign_ops));
-}
-
-static inline struct pvr_fence *to_pvr_fence(struct dma_fence *fence)
-{
-	if (is_pvr_fence(fence))
-		return container_of(fence, struct pvr_fence, base);
-
-	return NULL;
-}
+bool is_pvr_fence(struct dma_fence *fence);
+struct pvr_fence *to_pvr_fence(struct dma_fence *fence);
 
 PVRSRV_ERROR pvr_fence_context_register_dbg(void *dbg_request_handle,
 				void *dev,
@@ -179,6 +171,8 @@ int pvr_fence_get_checkpoints(struct pvr_fence **pvr_fences, u32 nr_fences,
 			      struct SYNC_CHECKPOINT_TAG **fence_checkpoints);
 struct SYNC_CHECKPOINT_TAG *
 pvr_fence_get_checkpoint(struct pvr_fence *update_fence);
+struct SYNC_CHECKPOINT_TAG *
+pvr_fence_get_and_ref_checkpoint(struct pvr_fence *update_fence);
 
 void pvr_fence_context_signal_fences_nohw(void *data);
 
@@ -188,23 +182,16 @@ u32 pvr_fence_dump_info_on_stalled_ufos(struct pvr_fence_context *fctx,
 					u32 nr_ufos,
 					u32 *vaddrs);
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-extern struct workqueue_struct *gpFenceDestroyWq;
-#endif
-
+#if defined(SUPPORT_NATIVE_FENCE_SYNC) || defined(SUPPORT_BUFFER_SYNC)
 static inline void pvr_fence_cleanup(void)
 {
 	/*
 	 * Ensure all PVR fence contexts have been destroyed, by flushing
-	 * the global workqueue.
+	 * the context destruction workqueue.
 	 */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-	if (gpFenceDestroyWq)
-		flush_workqueue(gpFenceDestroyWq);
-#else
-	flush_scheduled_work();
-#endif
+	flush_workqueue(NativeSyncGetFenceCtxDestroyWq());
 }
+#endif
 
 #if defined(PVR_FENCE_DEBUG)
 #define PVR_FENCE_CTX_TRACE(c, fmt, ...)                                   \
@@ -244,5 +231,4 @@ static inline void pvr_fence_cleanup(void)
 #define PVR_FENCE_ERR(f, fmt, ...)                                         \
 	DMA_FENCE_ERR(f, "(PVR) " fmt, ## __VA_ARGS__)
 
-#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0)) */
 #endif /* !defined(__PVR_FENCE_H__) */

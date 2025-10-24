@@ -69,11 +69,20 @@ extern "C" {
 	#include <linux/types.h>
 	#include "kernel_types.h"
 #elif defined(__linux__) || defined(__METAG) || defined(__MINGW32__) || \
-	defined(__QNXNTO__) || defined(INTEGRITY_OS) || defined(__riscv)
+	defined(__QNXNTO__) || defined(INTEGRITY_OS) || defined(__riscv) || \
+	defined(__APPLE__) || defined(TEE_DDK)
 	#include <stddef.h>			/* NULL */
 	#include <stdint.h>
+#if defined(__riscv)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wundef"
+#endif
 	#include <inttypes.h>		/* intX_t/uintX_t, format specifiers */
 	#include <limits.h>			/* INT_MIN, etc */
+	#include <sys/types.h>		/* ssize_t */
+#if defined(__riscv)
+#pragma GCC diagnostic pop
+#endif
 	#include <stdbool.h>		/* bool */
 #elif defined(__mips)
 	#include <stddef.h>			/* NULL */
@@ -142,10 +151,14 @@ typedef int64_t			IMG_INT64;
 #define IMG_UINT64_FMTSPECo PRIo64
 #define IMG_INT64_FMTSPECd PRId64
 
+#define IMG_UINT8_MAX	UINT8_MAX
 #define IMG_UINT16_MAX	UINT16_MAX
 #define IMG_UINT32_MAX	UINT32_MAX
 #define IMG_UINT64_MAX	UINT64_MAX
 
+#define IMG_INT_MIN		INT_MIN
+#define IMG_INT_MAX		INT_MAX
+#define IMG_INT8_MAX	INT8_MAX
 #define IMG_INT16_MAX	INT16_MAX
 #define IMG_INT32_MAX	INT32_MAX
 #define IMG_INT64_MAX	INT64_MAX
@@ -162,19 +175,15 @@ typedef union
 
 typedef int				IMG_SECURE_TYPE;
 
-typedef	enum tag_img_bool
-{
-	IMG_FALSE		= 0,
-	IMG_TRUE		= 1,
-	IMG_FORCE_ALIGN = 0x7FFFFFFF
-} IMG_BOOL, *IMG_PBOOL;
+typedef bool      IMG_BOOL;
+typedef bool*     IMG_PBOOL;
+#define IMG_FALSE ((bool) 0)
+#define IMG_TRUE  ((bool) 1)
 
-#if defined(UNDER_WDDM) || defined(WINDOWS_WDF)
 typedef IMG_CHAR const* IMG_PCCHAR;
-#endif
 
 /* Format specifiers for 'size_t' type */
-#if defined(_MSC_VER) || defined(__MINGW32__)
+#if defined(_MSC_VER)
 #define IMG_SIZE_FMTSPEC  "%Iu"
 #define IMG_SIZE_FMTSPECX "%Ix"
 #else
@@ -248,6 +257,12 @@ typedef int             IMG_OS_CONNECTION;
 #define IMG_DEVMEM_SIZE_FMTSPEC "0x%010" IMG_UINT64_FMTSPECX
 #define IMG_DEVMEM_ALIGN_FMTSPEC "0x%010" IMG_UINT64_FMTSPECX
 #define IMG_DEVMEM_OFFSET_FMTSPEC "0x%010" IMG_UINT64_FMTSPECX
+
+#if !defined(DEBUG) && defined(__linux__) && defined(__KERNEL__)
+	#define IMG_KM_PTR_FMTSPEC "%pK"
+#else
+	#define IMG_KM_PTR_FMTSPEC "%p"
+#endif
 
 /* cpu physical address */
 typedef struct

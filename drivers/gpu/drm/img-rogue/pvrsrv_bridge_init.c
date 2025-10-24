@@ -94,8 +94,10 @@ void DeinitRGXHWPERFBridge(void);
 PVRSRV_ERROR InitRGXREGCONFIGBridge(void);
 void DeinitRGXREGCONFIGBridge(void);
 #endif
+#if defined(SUPPORT_RGXKICKSYNC_BRIDGE)
 PVRSRV_ERROR InitRGXKICKSYNCBridge(void);
 void DeinitRGXKICKSYNCBridge(void);
+#endif
 #endif /* SUPPORT_RGX */
 PVRSRV_ERROR InitCACHEBridge(void);
 void DeinitCACHEBridge(void);
@@ -103,7 +105,7 @@ void DeinitCACHEBridge(void);
 PVRSRV_ERROR InitSMMBridge(void);
 void DeinitSMMBridge(void);
 #endif
-#if !defined(EXCLUDE_HTBUFFER_BRIDGE)
+#if defined(PVRSRV_ENABLE_HTB)
 PVRSRV_ERROR InitHTBUFFERBridge(void);
 void DeinitHTBUFFERBridge(void);
 #endif
@@ -119,10 +121,6 @@ void DeinitDEVICEMEMHISTORYBridge(void);
 PVRSRV_ERROR InitVALIDATIONBridge(void);
 void DeinitVALIDATIONBridge(void);
 #endif
-#if defined(PVR_TESTING_UTILS)
-PVRSRV_ERROR InitTUTILSBridge(void);
-void DeinitTUTILSBridge(void);
-#endif
 PVRSRV_ERROR InitSYNCTRACKINGBridge(void);
 void DeinitSYNCTRACKINGBridge(void);
 #if defined(SUPPORT_WRAP_EXTMEM)
@@ -135,10 +133,8 @@ void DeinitSYNCFALLBACKBridge(void);
 #endif
 PVRSRV_ERROR InitRGXTIMERQUERYBridge(void);
 void DeinitRGXTIMERQUERYBridge(void);
-#if defined(SUPPORT_DI_BRG_IMPL)
 PVRSRV_ERROR InitDIBridge(void);
 void DeinitDIBridge(void);
-#endif
 
 PVRSRV_ERROR
 ServerBridgeInit(void)
@@ -187,7 +183,7 @@ ServerBridgeInit(void)
 	PVR_LOG_IF_ERROR(eError, "InitSMMBridge");
 #endif
 
-#if !defined(EXCLUDE_HTBUFFER_BRIDGE)
+#if defined(PVRSRV_ENABLE_HTB)
 	eError = InitHTBUFFERBridge();
 	PVR_LOG_IF_ERROR(eError, "InitHTBUFFERBridge");
 #endif
@@ -205,10 +201,6 @@ ServerBridgeInit(void)
 	PVR_LOG_IF_ERROR(eError, "InitVALIDATIONBridge");
 #endif
 
-#if defined(PVR_TESTING_UTILS)
-	eError = InitTUTILSBridge();
-	PVR_LOG_IF_ERROR(eError, "InitTUTILSBridge");
-#endif
 
 	eError = InitDEVICEMEMHISTORYBridge();
 	PVR_LOG_IF_ERROR(eError, "InitDEVICEMEMHISTORYBridge");
@@ -252,8 +244,10 @@ ServerBridgeInit(void)
 	PVR_LOG_IF_ERROR(eError, "InitRGXREGCONFIGBridge");
 #endif
 
+#if defined(SUPPORT_RGXKICKSYNC_BRIDGE)
 	eError = InitRGXKICKSYNCBridge();
 	PVR_LOG_IF_ERROR(eError, "InitRGXKICKSYNCBridge");
+#endif
 
 	eError = InitRGXTIMERQUERYBridge();
 	PVR_LOG_IF_ERROR(eError, "InitRGXTIMERQUERYBridge");
@@ -270,10 +264,8 @@ ServerBridgeInit(void)
 	PVR_LOG_IF_ERROR(eError, "InitSYNCFALLBACKBridge");
 #endif
 
-#if defined(SUPPORT_DI_BRG_IMPL)
 	eError = InitDIBridge();
 	PVR_LOG_IF_ERROR(eError, "InitDIBridge");
-#endif
 
 	eError = OSPlatformBridgeInit();
 	PVR_LOG_IF_ERROR(eError, "OSPlatformBridgeInit");
@@ -285,9 +277,7 @@ void ServerBridgeDeInit(void)
 {
 	OSPlatformBridgeDeInit();
 
-#if defined(SUPPORT_DI_BRG_IMPL)
 	DeinitDIBridge();
-#endif
 
 #if defined(SUPPORT_FALLBACK_FENCE_SYNC)
 	DeinitSYNCFALLBACKBridge();
@@ -317,9 +307,6 @@ void ServerBridgeDeInit(void)
 	DeinitPDUMPBridge();
 #endif
 
-#if defined(PVR_TESTING_UTILS)
-	DeinitTUTILSBridge();
-#endif
 
 #if defined(SUPPORT_DISPLAY_CLASS)
 	DeinitDCBridge();
@@ -331,7 +318,7 @@ void ServerBridgeDeInit(void)
 	DeinitSMMBridge();
 #endif
 
-#if !defined(EXCLUDE_HTBUFFER_BRIDGE)
+#if defined(PVRSRV_ENABLE_HTB)
 	DeinitHTBUFFERBridge();
 #endif
 
@@ -377,9 +364,10 @@ void ServerBridgeDeInit(void)
 	DeinitRGXREGCONFIGBridge();
 #endif
 
+#if defined(SUPPORT_RGXKICKSYNC_BRIDGE)
 	DeinitRGXKICKSYNCBridge();
+#endif
 
 	DeinitRGXTIMERQUERYBridge();
-
 #endif /* SUPPORT_RGX */
 }

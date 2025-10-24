@@ -45,32 +45,71 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define VZ_VMM_PVZ_H
 
 #include "img_types.h"
-#include "vmm_impl.h"
 
 /*!
 *******************************************************************************
- @Function      PvzConnectionInit() and PvzConnectionDeInit()
- @Description   PvzConnectionInit initializes the VM manager para-virt
-                which is used subsequently for communication between guest and
-                host; depending on the underlying VM setup, this could either
-                be a hyper-call or cross-VM call
+ @Function      PvzConfigInit()
+ @Description   Initialises the driver-wide paravirtualisation infrastructure.
+                It is device-agnostic and is called once on driver load.
+                This init does NOT include pvz connection init, necessary to
+                communicate with the VMM or other drivers running inside VMs.
  @Return        PVRSRV_OK on success. Otherwise, a PVRSRV error code
 ******************************************************************************/
-PVRSRV_ERROR PvzConnectionInit(PVRSRV_DEVICE_CONFIG *psDevConfig);
-void PvzConnectionDeInit(void);
+PVRSRV_ERROR PvzConfigInit(void);
 
 /*!
 *******************************************************************************
- @Function      PvzConnectionAcquire() and PvzConnectionRelease()
- @Description   These are to acquire/release a handle to the VM manager
-                para-virtz connection to make a pvz call; on the client, use it
-                it to make the actual pvz call and on the server handler /
-                VM manager, use it to complete the processing for the pvz call
-                or make a VM manager to host pvzbridge call
-@Return         VMM_PVZ_CONNECTION* on success. Otherwise NULL
+ @Function      PvzConfigDeInit()
+ @Description   Deinitialises the entire paravirtualisation functionality,
+                including the pvz connections.
+                It is device-agnostic and is called on driver unload.
 ******************************************************************************/
-VMM_PVZ_CONNECTION* PvzConnectionAcquire(void);
-void PvzConnectionRelease(VMM_PVZ_CONNECTION *psPvzConnection);
+void PvzConfigDeInit(void);
+
+/*!
+*******************************************************************************
+ @Function      PvzConnectionInit()
+ @Description   Initialises the paravirtualisation connection with the VMM,
+                if applicable. There are two types of pvz interfaces:
+                the server interface used by VZ Hosts and the client
+                interface used by VZ Guests. A driver usually determines
+                which role(s) it needs to fulfil at probe time, when the
+                devices are enumerated. This function is called on every
+                PVRSRVCommonDeviceCreate() to ensure that the pvz interface
+                type required by that device is initialised.
+                Once open, a pvz connection remains in effect until driver
+                exit, regardless of the state of individual devices.
+ @Return        PVRSRV_OK on success. Otherwise, a PVRSRV error code
+******************************************************************************/
+PVRSRV_ERROR PvzConnectionInit(PVRSRV_DRIVER_MODE eDriverMode);
+
+/*!
+*******************************************************************************
+ @Function      PvzServerLockAcquire()
+ @Description   Acquire the PVZ server lock
+******************************************************************************/
+void PvzServerLockAcquire(void);
+
+/*!
+*******************************************************************************
+ @Function      PvzServerLockRelease()
+ @Description   Release the PVZ server lock
+******************************************************************************/
+void PvzServerLockRelease(void);
+
+/*!
+*******************************************************************************
+ @Function      PvzClientLockAcquire()
+ @Description   Acquire the PVZ client lock
+******************************************************************************/
+void PvzClientLockAcquire(void);
+
+/*!
+*******************************************************************************
+ @Function      PvzClientLockRelease()
+ @Description   Release the PVZ client lock
+******************************************************************************/
+void PvzClientLockRelease(void);
 
 #endif /* VZ_VMM_PVZ_H */
 

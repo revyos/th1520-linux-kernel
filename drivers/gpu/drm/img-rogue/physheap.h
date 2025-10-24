@@ -48,12 +48,39 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "opaque_types.h"
 #include "pmr_impl.h"
 #include "physheap_config.h"
+#include "pvrsrv_device.h"
+#include "ra.h"
 
 #ifndef PHYSHEAP_H
 #define PHYSHEAP_H
 
+#define B2KB(x) ((x) >> 10)
+#define B2MB(x) ((x) >> 20)
+
+static inline IMG_UINT64 KB2B(IMG_UINT64 ui64Kilobytes) { return ui64Kilobytes << 10; }
+static inline IMG_UINT64 MB2B(IMG_UINT64 ui64Megabytes) { return ui64Megabytes << 20; }
+
 typedef struct _PHYS_HEAP_ PHYS_HEAP;
 #define INVALID_PHYS_HEAP 0xDEADDEAD
+
+/* PMB (Physical Memory Block) */
+typedef struct _PMB_ PMB;
+
+typedef IMG_UINT32 PHYS_HEAP_POLICY;
+
+/* Heap has default allocation policy and does not require
+ * any additional OS Functionality. Physically contiguous
+ * allocations are required for this physheap.
+ */
+#define PHYS_HEAP_POLICY_DEFAULT (0U)
+
+/*
+ * Heap has allocation strategy that may produce non
+ * physically contiguous allocations, additional OS functionality
+ * is required to map these allocations into the kernel.
+ */
+#define PHYS_HEAP_POLICY_ALLOC_ALLOW_NONCONTIG      (1U)
+#define PHYS_HEAP_POLICY_ALLOC_ALLOW_NONCONTIG_MASK (1U)
 
 struct _CONNECTION_DATA_;
 
@@ -134,6 +161,29 @@ typedef IMG_UINT32 (*PFN_GET_PAGE_SHIFT)(void);
 */ /**************************************************************************/
 typedef void (*PFN_GET_MEM_STATS)(PHEAP_IMPL_DATA, IMG_UINT64 *, IMG_UINT64 *);
 
+/*************************************************************************/ /*!
+@Function       Callback function PFN_GET_HEAP_STATS_STR_ITER
+@Description    Get string of heap memory spans constituting the heap. This
+                function can be iterated on to print sequential lines of the
+                heap data. Iterate until IMG_FALSE is returned
+@Input          PHEAP_IMPL_DATA    Pointer to implementation data.
+@InOut          IMG_CHAR           Pointer to string buffer to be populated
+                                   with sequential heap data.
+@Input          IMG_UINT32         Size of the string buffer.
+@InOut          void**             Iter handle.
+@Return         IMG_BOOL
+*/ /**************************************************************************/
+typedef IMG_BOOL (*PFN_GET_HEAP_SPANS_STR_ITER)(PHEAP_IMPL_DATA, IMG_CHAR *, IMG_UINT32, void **);
+
+/*************************************************************************/ /*!
+@Function       Callback function PFN_GET_HEAP_DLM_BACKING
+@Description    Extract reference to DLM heap backing the current IMA heap.
+@Input          PHEAP_IMPL_DATA    Pointer to implementation data.
+@InOut          PHYS_HEAP**        Pointer to DLM backing heap.
+@Return         void
+*/ /**************************************************************************/
+typedef void (*PFN_GET_HEAP_DLM_BACKING)(PHEAP_IMPL_DATA, PHYS_HEAP **);
+
 #if defined(SUPPORT_GPUVIRT_VALIDATION)
 typedef PVRSRV_ERROR (*PFN_PAGES_ALLOC_GPV)(PHYS_HEAP *psPhysHeap, size_t uiSize,
                                             PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr,
@@ -165,7 +215,6 @@ typedef PVRSRV_ERROR (*PFN_PAGES_CLEAN)(PHYS_HEAP *psPhysHeap,
 @Input          psPhysHeap         Pointer to Phys Heap.
 @Input          psConnection       Pointer to device connection.
 @Input          uiSize             Allocation size.
-@Input          uiChunkSize        Chunk size.
 @Input          ui32NumPhysChunks  Physical chunk count.
 @Input          ui32NumVirtChunks  Virtual chunk count.
 @Input          pui32MappingTable  Mapping Table.
@@ -180,7 +229,6 @@ typedef PVRSRV_ERROR (*PFN_PAGES_CLEAN)(PHYS_HEAP *psPhysHeap,
 typedef PVRSRV_ERROR (*PFN_CREATE_PMR)(PHYS_HEAP *psPhysHeap,
 									   struct _CONNECTION_DATA_ *psConnection,
 									   IMG_DEVMEM_SIZE_T uiSize,
-									   IMG_DEVMEM_SIZE_T uiChunkSize,
 									   IMG_UINT32 ui32NumPhysChunks,
 									   IMG_UINT32 ui32NumVirtChunks,
 									   IMG_UINT32 *pui32MappingTable,
@@ -191,6 +239,27 @@ typedef PVRSRV_ERROR (*PFN_CREATE_PMR)(PHYS_HEAP *psPhysHeap,
 									   PMR **ppsPMRPtr,
 									   IMG_UINT32 ui32PDumpFlags);
 
+/*************************************************************************/ /*!
+@Function       Callback function PFN_CREATE_PMB
+@Description    Create a PMB physical allocation and back with Card memory
+                on creation, if required. The card memory comes
+                directly from the DLM Phys Heap's associated pool of memory.
+@Input          psPhysHeap         Pointer to Phys Heap to create the PMB on,
+                                   physheap should be DLM type.
+@Input          uiSize             Allocation size.
+@Input          pszAnnotation      Annotation.
+@Output         ppsPMBPtr          Pointer to PMB created.
+@Output         puiBase            Out pointer to RA Base of PMB.
+@Output         puiSize            Out pointer to size of PMB
+@Return         PVRSRV_ERROR       PVRSRV_OK or error code
+*/ /**************************************************************************/
+typedef PVRSRV_ERROR (*PFN_CREATE_PMB)(PHYS_HEAP *psPhysHeap,
+                                       IMG_DEVMEM_SIZE_T uiSize,
+                                       const IMG_CHAR *pszAnnotation,
+                                       PMB **ppsPMBPtr,
+                                       RA_BASE_T *puiBase,
+                                       RA_LENGTH_T *puiSize);
+
 /*! Implementation specific function table */
 typedef struct PHEAP_IMPL_FUNCS_TAG
 {
@@ -199,8 +268,11 @@ typedef struct PHEAP_IMPL_FUNCS_TAG
 	PFN_GET_CPU_PADDR pfnGetCPUPAddr;
 	PFN_GET_SIZE pfnGetSize;
 	PFN_GET_PAGE_SHIFT pfnGetPageShift;
-	PFN_GET_MEM_STATS pfnGetPMRFactoryMemStats;
+	PFN_GET_MEM_STATS pfnGetFactoryMemStats;
+	PFN_GET_HEAP_SPANS_STR_ITER pfnGetHeapSpansStringIter;
+	PFN_GET_HEAP_DLM_BACKING pfnGetHeapDLMBacking;
 	PFN_CREATE_PMR pfnCreatePMR;
+	PFN_CREATE_PMB pfnCreatePMB;
 #if defined(SUPPORT_GPUVIRT_VALIDATION)
 	PFN_PAGES_ALLOC_GPV pfnPagesAllocGPV;
 #endif
@@ -212,17 +284,21 @@ typedef struct PHEAP_IMPL_FUNCS_TAG
 } PHEAP_IMPL_FUNCS;
 
 /*************************************************************************/ /*!
-@Function       PhysHeapCreateDeviceHeapsFromConfigs
-@Description    Create new heaps for a device from configs.
-@Input          psDevNode      Pointer to device node struct
-@Input          pasConfigs     Pointer to array of Heap configurations.
-@Input          ui32NumConfigs Number of configurations in array.
-@Return         PVRSRV_ERROR PVRSRV_OK or error code
+@Function       PhysHeapInitDeviceHeaps
+@Description    Registers and acquires physical memory heaps
+@Input          psDeviceNode pointer to device node
+@Input          psDevConfig  pointer to device config
+@Return         PVRSRV_ERROR PVRSRV_OK on success, or a PVRSRV_ error code
 */ /**************************************************************************/
-PVRSRV_ERROR
-PhysHeapCreateDeviceHeapsFromConfigs(PPVRSRV_DEVICE_NODE psDevNode,
-                                     PHYS_HEAP_CONFIG *pasConfigs,
-                                     IMG_UINT32 ui32NumConfigs);
+PVRSRV_ERROR PhysHeapInitDeviceHeaps(PPVRSRV_DEVICE_NODE psDeviceNode, PVRSRV_DEVICE_CONFIG *psDevConfig);
+
+/*************************************************************************/ /*!
+@Function       PhysHeapDeInitDeviceHeaps
+@Description    Releases and unregisters physical memory heaps
+@Input          psDeviceNode pointer to device node
+@Return         PVRSRV_ERROR PVRSRV_OK on success, or a PVRSRV_ error code
+*/ /**************************************************************************/
+void PhysHeapDeInitDeviceHeaps(PPVRSRV_DEVICE_NODE psDeviceNode);
 
 /*************************************************************************/ /*!
 @Function       PhysHeapCreateHeapFromConfig
@@ -230,7 +306,7 @@ PhysHeapCreateDeviceHeapsFromConfigs(PPVRSRV_DEVICE_NODE psDevNode,
                 on heap type.
 @Input          psDevNode    Pointer to device node struct.
 @Input          psConfig     Heap configuration.
-@Output         ppsPhysHeap  Pointer to the created heap.
+@Output         ppsPhysHeap  Optional pointer to the created heap. Can be NULL
 @Return         PVRSRV_ERROR PVRSRV_OK or error code
 */ /**************************************************************************/
 PVRSRV_ERROR
@@ -244,17 +320,18 @@ PhysHeapCreateHeapFromConfig(PPVRSRV_DEVICE_NODE psDevNode,
                 Destroy with PhysHeapDestroy when no longer required.
 @Input          psDevNode    Pointer to device node struct
 @Input          psConfig     Heap configuration.
+@Input          uiPolicy     Phys heap allocation policy.
 @Input          pvImplData   Implementation specific data. Can be NULL.
 @Input          psImplFuncs  Implementation specific function table. Must be
                              a valid pointer.
-@Output         ppsPhysHeap  Pointer to the created heap. Must be a valid
-                             pointer.
+@Output         ppsPhysHeap  Optional pointer to the created heap. Can be NULL
 @Return         PVRSRV_ERROR PVRSRV_OK or error code
 */ /**************************************************************************/
 PVRSRV_ERROR PhysHeapCreate(PPVRSRV_DEVICE_NODE psDevNode,
 							PHYS_HEAP_CONFIG *psConfig,
+							PHYS_HEAP_POLICY uiPolicy,
 							PHEAP_IMPL_DATA pvImplData,
-							PHEAP_IMPL_FUNCS *psImplFuncs,
+							const PHEAP_IMPL_FUNCS *psImplFuncs,
 							PHYS_HEAP **ppsPhysHeap);
 
 /*************************************************************************/ /*!
@@ -270,28 +347,16 @@ void PhysHeapDestroy(PHYS_HEAP *psPhysHeap);
 PVRSRV_ERROR PhysHeapAcquire(PHYS_HEAP *psPhysHeap);
 
 /*************************************************************************/ /*!
-@Function       PhysHeapAcquireByUsage
-@Description    Acquire PhysHeap by usage flag.
-@Input          ui32UsageFlag PhysHeap usage flag
-@Input          psDevNode     Pointer to device node struct
-@Output         ppsPhysHeap   PhysHeap if found.
-@Return         PVRSRV_ERROR PVRSRV_OK or error code
-*/ /**************************************************************************/
-PVRSRV_ERROR PhysHeapAcquireByUsage(PHYS_HEAP_USAGE_FLAGS ui32UsageFlag,
-									PPVRSRV_DEVICE_NODE psDevNode,
-									PHYS_HEAP **ppsPhysHeap);
-
-/*************************************************************************/ /*!
-@Function       PhysHeapAcquireByDevPhysHeap
+@Function       PhysHeapAcquireByID
 @Description    Acquire PhysHeap by DevPhysHeap.
 @Input          eDevPhysHeap Device Phys Heap.
 @Input          psDevNode    Pointer to device node struct
 @Output         ppsPhysHeap  PhysHeap if found.
 @Return         PVRSRV_ERROR PVRSRV_OK or error code
 */ /**************************************************************************/
-PVRSRV_ERROR PhysHeapAcquireByDevPhysHeap(PVRSRV_PHYS_HEAP eDevPhysHeap,
-										  PPVRSRV_DEVICE_NODE psDevNode,
-										  PHYS_HEAP **ppsPhysHeap);
+PVRSRV_ERROR PhysHeapAcquireByID(PVRSRV_PHYS_HEAP eDevPhysHeap,
+								 PPVRSRV_DEVICE_NODE psDevNode,
+								 PHYS_HEAP **ppsPhysHeap);
 
 void PhysHeapRelease(PHYS_HEAP *psPhysHeap);
 
@@ -307,6 +372,14 @@ PHEAP_IMPL_DATA PhysHeapGetImplData(PHYS_HEAP *psPhysHeap);
 PHYS_HEAP_TYPE PhysHeapGetType(PHYS_HEAP *psPhysHeap);
 
 /*************************************************************************/ /*!
+@Function       PhysHeapGetPolicy
+@Description    Get phys heap allocation policy flags.
+@Input          psPhysHeap   Pointer to physical heap.
+@Return         PHYS_HEAP_POLICY Phys heap policy flags.
+*/ /**************************************************************************/
+PHYS_HEAP_POLICY PhysHeapGetPolicy(PHYS_HEAP *psPhysHeap);
+
+/*************************************************************************/ /*!
 @Function       PhysHeapGetFlags
 @Description    Get phys heap usage flags.
 @Input          psPhysHeap   Pointer to physical heap.
@@ -316,22 +389,20 @@ PHYS_HEAP_USAGE_FLAGS PhysHeapGetFlags(PHYS_HEAP *psPhysHeap);
 
 IMG_BOOL PhysHeapValidateDefaultHeapExists(PPVRSRV_DEVICE_NODE psDevNode);
 
+#if defined(SUPPORT_STATIC_IPA)
+IMG_UINT32 PhysHeapGetIPAValue(PHYS_HEAP *psPhysHeap);
+
+IMG_UINT32 PhysHeapGetIPAMask(PHYS_HEAP *psPhysHeap);
+
+IMG_UINT32 PhysHeapGetIPAShift(PHYS_HEAP *psPhysHeap);
+#endif
+
 PVRSRV_ERROR PhysHeapGetCpuPAddr(PHYS_HEAP *psPhysHeap,
 									   IMG_CPU_PHYADDR *psCpuPAddr);
 
 
 PVRSRV_ERROR PhysHeapGetSize(PHYS_HEAP *psPhysHeap,
 								   IMG_UINT64 *puiSize);
-
-/*************************************************************************/ /*!
-@Function       PVRSRVGetDevicePhysHeapCount
-@Description    Get the physical heap count supported by the device.
-@Input          psDevNode   Device node, the heap count is requested for.
-@Output         pui32PhysHeapCount  Buffer that holds the heap count
-@Return         None
-*/ /**************************************************************************/
-void PVRSRVGetDevicePhysHeapCount(PPVRSRV_DEVICE_NODE psDevNode,
-								  IMG_UINT32 *pui32PhysHeapCount);
 
 /*************************************************************************/ /*!
 @Function       PhysHeapGetMemInfo
@@ -344,38 +415,9 @@ void PVRSRVGetDevicePhysHeapCount(PPVRSRV_DEVICE_NODE psDevNode,
 */ /**************************************************************************/
 PVRSRV_ERROR
 PhysHeapGetMemInfo(PPVRSRV_DEVICE_NODE psDevNode,
-				   IMG_UINT32 ui32PhysHeapCount,
-				   PVRSRV_PHYS_HEAP *paePhysHeapID,
-				   PHYS_HEAP_MEM_STATS_PTR paPhysHeapMemStats);
-
-/*************************************************************************/ /*!
-@Function       PhysHeapGetMemInfoPkd
-@Description    Get phys heap memory statistics for a given physical heap ID.
-@Input          psDevNode          Pointer to device node struct
-@Input          ui32PhysHeapCount  Physical heap count
-@Input          paePhysHeapID      Physical heap ID
-@Output         paPhysHeapMemStats Buffer that holds the memory statistics
-@Return         PVRSRV_ERROR PVRSRV_OK or error code
-*/ /**************************************************************************/
-PVRSRV_ERROR
-PhysHeapGetMemInfoPkd(PPVRSRV_DEVICE_NODE psDevNode,
-					  IMG_UINT32 ui32PhysHeapCount,
-					  PVRSRV_PHYS_HEAP *paePhysHeapID,
-					  PHYS_HEAP_MEM_STATS_PKD_PTR paPhysHeapMemStats);
-
-/*************************************************************************/ /*!
-@Function       PhysheapGetPhysMemUsage
-@Description    Get memory statistics for a given physical heap.
-@Input          psPhysHeap      Physical heap
-@Output         pui64TotalSize  Buffer that holds the total memory size of the
-                                given physical heap.
-@Output         pui64FreeSize   Buffer that holds the free memory available in
-                                a given physical heap.
-@Return         none
-*/ /**************************************************************************/
-void PhysheapGetPhysMemUsage(PHYS_HEAP *psPhysHeap,
-							 IMG_UINT64 *pui64TotalSize,
-							 IMG_UINT64 *pui64FreeSize);
+                   IMG_UINT32 ui32PhysHeapCount,
+                   PVRSRV_PHYS_HEAP *paePhysHeapID,
+                   PHYS_HEAP_MEM_STATS_PTR paPhysHeapMemStats);
 
 PVRSRV_ERROR PhysHeapGetDevPAddr(PHYS_HEAP *psPhysHeap,
 								 IMG_DEV_PHYADDR *psDevPAddr);
@@ -392,6 +434,8 @@ void PhysHeapDevPAddrToCpuPAddr(PHYS_HEAP *psPhysHeap,
 
 IMG_CHAR *PhysHeapPDumpMemspaceName(PHYS_HEAP *psPhysHeap);
 
+const IMG_CHAR *PhysHeapName(PHYS_HEAP *psPhysHeap);
+
 /*************************************************************************/ /*!
 @Function       PhysHeapCreatePMR
 @Description    Function calls an implementation-specific function pointer.
@@ -401,7 +445,6 @@ IMG_CHAR *PhysHeapPDumpMemspaceName(PHYS_HEAP *psPhysHeap);
 PVRSRV_ERROR PhysHeapCreatePMR(PHYS_HEAP *psPhysHeap,
 							   struct _CONNECTION_DATA_ *psConnection,
 							   IMG_DEVMEM_SIZE_T uiSize,
-							   IMG_DEVMEM_SIZE_T uiChunkSize,
 							   IMG_UINT32 ui32NumPhysChunks,
 							   IMG_UINT32 ui32NumVirtChunks,
 							   IMG_UINT32 *pui32MappingTable,
@@ -410,10 +453,21 @@ PVRSRV_ERROR PhysHeapCreatePMR(PHYS_HEAP *psPhysHeap,
 							   const IMG_CHAR *pszAnnotation,
 							   IMG_PID uiPid,
 							   PMR **ppsPMRPtr,
-							   IMG_UINT32 ui32PDumpFlags);
+							   IMG_UINT32 ui32PDumpFlags,
+							   PVRSRV_MEMALLOCFLAGS_T *uiOutFlags);
 
-PVRSRV_ERROR PhysHeapInit(void);
-void PhysHeapDeinit(void);
+/*************************************************************************/ /*!
+@Function       PhysHeapCreatePMB
+@Description    Function calls an implementation-specific function pointer.
+                See @Ref PFN_CREATE_PMB "PFN_CREATE_PMB" for details.
+@Return         PVRSRV_ERROR       PVRSRV_OK or error code
+*/ /**************************************************************************/
+PVRSRV_ERROR PhysHeapCreatePMB(PHYS_HEAP *psPhysHeap,
+                               IMG_DEVMEM_SIZE_T uiSize,
+                               const IMG_CHAR *pszAnnotation,
+                               PMB **ppsPMRPtr,
+                               RA_BASE_T *puiBase,
+                               RA_LENGTH_T *puiSize);
 
 /*************************************************************************/ /*!
 @Function       PhysHeapDeviceNode
@@ -424,12 +478,12 @@ void PhysHeapDeinit(void);
 PPVRSRV_DEVICE_NODE PhysHeapDeviceNode(PHYS_HEAP *psPhysHeap);
 
 /*************************************************************************/ /*!
-@Function       PhysHeapPVRLayerAcquire
-@Description    Is phys heap to be acquired in PVR layer?
+@Function       PhysHeapInitByPVRLayer
+@Description    Is phys heap to be initialised in PVR layer?
 @Input          ePhysHeap           phys heap
 @Return         IMG_BOOL            return IMG_TRUE if yes
 */ /**************************************************************************/
-IMG_BOOL PhysHeapPVRLayerAcquire(PVRSRV_PHYS_HEAP ePhysHeap);
+IMG_BOOL PhysHeapInitByPVRLayer(PVRSRV_PHYS_HEAP ePhysHeap);
 
 /*************************************************************************/ /*!
 @Function       PhysHeapUserModeAlloc
@@ -438,21 +492,6 @@ IMG_BOOL PhysHeapPVRLayerAcquire(PVRSRV_PHYS_HEAP ePhysHeap);
 @Return         IMG_BOOL            return IMG_TRUE if yes
 */ /**************************************************************************/
 IMG_BOOL PhysHeapUserModeAlloc(PVRSRV_PHYS_HEAP ePhysHeap);
-
-/*************************************************************************/ /*!
-@Function       PhysHeapMMUPxSetup
-@Description    Setup MMU Px allocation function pointers.
-@Input          psDeviceNode Pointer to device node struct
-@Return         PVRSRV_ERROR PVRSRV_OK on success.
-*/ /**************************************************************************/
-PVRSRV_ERROR PhysHeapMMUPxSetup(PPVRSRV_DEVICE_NODE psDeviceNode);
-
-/*************************************************************************/ /*!
-@Function       PhysHeapMMUPxDeInit
-@Description    Deinit after PhysHeapMMUPxSetup.
-@Input          psDeviceNode Pointer to device node struct
-*/ /**************************************************************************/
-void PhysHeapMMUPxDeInit(PPVRSRV_DEVICE_NODE psDeviceNode);
 
 #if defined(SUPPORT_GPUVIRT_VALIDATION)
 PVRSRV_ERROR PhysHeapPagesAllocGPV(PHYS_HEAP *psPhysHeap,
@@ -493,5 +532,33 @@ PVRSRV_ERROR PhysHeapPagesClean(PHYS_HEAP *psPhysHeap,
 @Return         IMG_UINT32   Log2 page shift
 */ /**************************************************************************/
 IMG_UINT32 PhysHeapGetPageShift(PHYS_HEAP *psPhysHeap);
+
+/*************************************************************************/ /*!
+@Function       PhysHeapFreeMemCheck
+@Description    Check a physheap has the required amount of free memory.
+
+@Input          psPhysHeap          Pointer to physical heap.
+@Input          ui64MinRequiredMem  The minimum free memory for success (bytes).
+@Output         pui64FreeMem        The free memory in the physical heap (bytes).
+
+@Return         PVRSRV_ERROR    If successful PVRSRV_OK else a PVRSRV_ERROR code.
+*/ /**************************************************************************/
+PVRSRV_ERROR PhysHeapFreeMemCheck(PHYS_HEAP *psPhysHeap,
+                                  IMG_UINT64 ui64MinRequiredMem,
+                                  IMG_UINT64 *pui64FreeMem);
+
+
+#if defined(PVRSRV_ENABLE_XD_MEM)
+/*************************************************************************/ /*!
+@Function       PhysHeapSpasWithDevice
+@Description    Check to see if the device can "see" the SPAS region of the heap.
+                Or in other words, check if any physheap exists
+                in the same SPAS region as `psFromPhysHeap` and is tied to `psToDevNode`.
+@Input          psFromPhysHeap  The physheap whose SPAS region to match.
+@Input          psToDevNode     The device node the other physheap must be tied to.
+@Return         PVRSRV_ERROR    PVRSRV_OK on success, error code otherwise.
+*/ /**************************************************************************/
+PVRSRV_ERROR PhysHeapSpasWithDevice(PHYS_HEAP* psFromPhysHeap, PPVRSRV_DEVICE_NODE psToDevNode);
+#endif
 
 #endif /* PHYSHEAP_H */

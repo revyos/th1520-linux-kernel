@@ -66,7 +66,7 @@ PVRSRV_ERROR RGXBvncInitialiseConfiguration(PVRSRV_DEVICE_NODE *psDeviceNode);
 @param		ui64FeatureMask - feature to be checked
 @return		true if feature is supported, false otherwise
 */ /**************************************************************************/
-IMG_BOOL RGXBvncCheckFeatureSupported(PVRSRV_DEVICE_NODE *psDeviceNode, IMG_UINT64 ui64FeatureMask);
+IMG_BOOL RGXBvncCheckFeatureSupported(PVRSRV_DEVICE_NODE *psDeviceNode, IMG_UINT16 ui16FeatureArrayIndex, IMG_UINT64 ui64FeatureMask);
 
 /*************************************************************************/ /*!
 @brief		This function returns the value of a feature on the given

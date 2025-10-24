@@ -65,13 +65,13 @@ IMG_INTERNAL PVRSRV_ERROR BridgeSyncRecordRemoveByHandle(IMG_HANDLE hBridge, IMG
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgeSyncRecordAdd(IMG_HANDLE hBridge,
-					      IMG_HANDLE * phhRecord,
+					      IMG_HANDLE *phhRecord,
 					      IMG_HANDLE hhServerSyncPrimBlock,
 					      IMG_UINT32 ui32ui32FwBlockAddr,
 					      IMG_UINT32 ui32ui32SyncOffset,
 					      IMG_BOOL bbServerSync,
 					      IMG_UINT32 ui32ClassNameSize,
-					      const IMG_CHAR * puiClassName)
+					      const IMG_CHAR *puiClassName)
 {
 	PVRSRV_ERROR eError;
 	SYNC_RECORD_HANDLE pshRecordInt = NULL;

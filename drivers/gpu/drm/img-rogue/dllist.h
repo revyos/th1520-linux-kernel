@@ -50,11 +50,27 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /*!
 	Pointer to a linked list node
 */
-typedef struct DLLIST_NODE_	*PDLLIST_NODE;
+typedef struct DLLIST_NODE_TAG	*PDLLIST_NODE;
 
 
 /*!
-	Node in a linked list
+	Node in a linked list.
+	A list is comprised of a single list head and 0 to n nodes.
+	The head and nodes are all represented by `DLLIST_NODE`'s.
+	The head node is a special sentinel and should not be associated with
+	any elements in the list.
+
+	For example, the following list of fruits has 3 elements:
+	`... <--> "banana" <--> "apple" <--> head <--> "orange" <--> ...`
+	Therefore, using dllist_foreach_*(head) will iterate just the 3 fruits.
+
+	This is important because a `dllist_is_empty` is when the number of
+	elements == 0 is equivalent to when the head points to itself.
+	Proper use of the dllist_* functions requires a head.
+
+	For example, the following list is improper:
+	`... <--> "banana" <--> "apple" <--> "orange" <--> ...`
+	as one element must be treated as the head, and therefore is ignored.
 */
 /*
  * Note: the following structure's size is architecture-dependent and clients
@@ -62,10 +78,10 @@ typedef struct DLLIST_NODE_	*PDLLIST_NODE;
  * used in a structure shared between host and device.
  * Consider such clients if any changes are made to this structure.
  */
-typedef struct DLLIST_NODE_
+typedef struct DLLIST_NODE_TAG
 {
-	struct DLLIST_NODE_	*psPrevNode;
-	struct DLLIST_NODE_	*psNextNode;
+	struct DLLIST_NODE_TAG	*psPrevNode;
+	struct DLLIST_NODE_TAG	*psNextNode;
 } DLLIST_NODE;
 
 
@@ -112,16 +128,16 @@ DLLIST_NODE (n) = {&(n), &(n)}
 */
 /*****************************************************************************/
 #define dllist_foreach(list_head)	\
-	for (DLLIST_NODE *_DllNode = (list_head).psNextNode, *_DllNext = _DllNode->psNextNode;		\
-		 _DllNode != &(list_head);																\
-		 _DllNode = _DllNext, _DllNext = _DllNode->psNextNode)
+	for (DLLIST_NODE *DllCurNode = (list_head).psNextNode, *DllNextNode = DllCurNode->psNextNode;		\
+		 DllCurNode != &(list_head);																\
+		 DllCurNode = DllNextNode, DllNextNode = DllCurNode->psNextNode)
 
 #define dllist_foreach_backwards(list_head)	\
-	for (DLLIST_NODE *_DllNode = (list_head).psPrevNode, *_DllPrev = _DllNode->psPrevNode;		\
-		 _DllNode != &(list_head);																\
-		 _DllNode = _DllPrev, _DllPrev = _DllNode->psPrevNode)
+	for (DLLIST_NODE *DllCurNode = (list_head).psPrevNode, *DllPrevNode = DllCurNode->psPrevNode;		\
+		 DllCurNode != &(list_head);																\
+		 DllCurNode = DllPrevNode, DllPrevNode = DllCurNode->psPrevNode)
 
-#define dllist_cur(type, member)	IMG_CONTAINER_OF(_DllNode, type, member)
+#define dllist_cur(type, member)	IMG_CONTAINER_OF(DllCurNode, type, member)
 
 /*************************************************************************/ /*!
 @Function       dllist_init
@@ -149,10 +165,9 @@ void dllist_init(PDLLIST_NODE psListHead)
 */
 /*****************************************************************************/
 static INLINE
-bool dllist_is_empty(PDLLIST_NODE psListHead)
+bool dllist_is_empty(const DLLIST_NODE *const psListHead)
 {
-	return ((psListHead->psPrevNode == psListHead)
-			&& (psListHead->psNextNode == psListHead));
+	return (psListHead->psPrevNode == psListHead);
 }
 
 /*************************************************************************/ /*!
@@ -214,7 +229,7 @@ void dllist_add_to_tail(PDLLIST_NODE psListHead, PDLLIST_NODE psNewNode)
 */
 /*****************************************************************************/
 static INLINE
-bool dllist_node_is_in_list(PDLLIST_NODE psNode)
+bool dllist_node_is_in_list(const DLLIST_NODE *const psNode)
 {
 	return (psNode->psNextNode != NULL);
 }
@@ -405,4 +420,36 @@ static INLINE void dllist_sort(PDLLIST_NODE psListHead,
 	}
 }
 
+/*************************************************************************/ /*!
+@Function       dllist_split
+
+@Description    Split the list at psNode from psOldHead and place in psNewHead
+                After the operation completes psNewHead will contain a list
+                starting at psNode and psOldHead will have psNode->prevNode as
+                its tail element (i.e.,
+                psOldHead->psPrevNode = psNode->prevNode, and the new tail
+                (psNode->prevNode->nextNode = psOldHead)).
+
+@Input          psNode                  List split-point.
+@Input          psOldHead               List head to remove psNode and remaining
+                                        nodes from.
+@Input          psNewHead               List head to receive new list
+*/
+/*****************************************************************************/
+static INLINE void dllist_split(PDLLIST_NODE psNode, PDLLIST_NODE psOldHead,
+                                PDLLIST_NODE psNewHead)
+{
+	PDLLIST_NODE psPrevNode = psNode->psPrevNode;
+	PDLLIST_NODE psCurTail = psOldHead->psPrevNode;
+
+	/* Split the list and move psNode ... psCurTail to psNewHead */
+	psNewHead->psPrevNode = psCurTail;
+	psNode->psPrevNode = psNewHead;
+	psCurTail->psNextNode = psNewHead;
+	psNewHead->psNextNode = psNode;
+
+	/* Now update the psOldHead tail pointer and psCurTail links */
+	psOldHead->psPrevNode = psPrevNode;
+	psPrevNode->psNextNode = psOldHead;
+}
 #endif /* DLLIST_H */

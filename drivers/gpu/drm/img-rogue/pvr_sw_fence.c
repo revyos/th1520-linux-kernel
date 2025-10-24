@@ -48,6 +48,7 @@
 #include <linux/bug.h>
 
 #include "pvr_sw_fence.h"
+#include "osfunc_common.h"
 
 struct pvr_sw_fence_context {
 	struct kref kref;
@@ -149,6 +150,11 @@ static const struct dma_fence_ops pvr_sw_fence_ops = {
 	.release = pvr_sw_fence_release,
 };
 
+bool is_pvr_sw_fence(const struct dma_fence *fence)
+{
+	return (fence->ops == &pvr_sw_fence_ops);
+}
+
 struct pvr_sw_fence_context *
 pvr_sw_fence_context_create(const char *context_name, const char *driver_name)
 {
@@ -159,9 +165,9 @@ pvr_sw_fence_context_create(const char *context_name, const char *driver_name)
 		return NULL;
 
 	fence_context->context = dma_fence_context_alloc(1);
-	strlcpy(fence_context->context_name, context_name,
+	OSStringSafeCopy(fence_context->context_name, context_name,
 		sizeof(fence_context->context_name));
-	strlcpy(fence_context->driver_name, driver_name,
+	OSStringSafeCopy(fence_context->driver_name, driver_name,
 		sizeof(fence_context->driver_name));
 	atomic_set(&fence_context->seqno, 0);
 	atomic_set(&fence_context->fence_count, 0);

@@ -179,19 +179,23 @@ OSLoadFirmware(PVRSRV_DEVICE_NODE *psDeviceNode, const IMG_CHAR *pszBVNCString,
 	IMG_INT32    res;
 	PVRSRV_ERROR eError;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0))
+	res = firmware_request_nowarn(&psFW, pszBVNCString, psDeviceNode->psDevConfig->pvOSDevice);
+#else
 	res = request_firmware(&psFW, pszBVNCString, psDeviceNode->psDevConfig->pvOSDevice);
+#endif
 	if (res != 0)
 	{
 		release_firmware(psFW);
 		if (res == -ENOENT)
 		{
-			PVR_DPF((PVR_DBG_WARNING, "%s: request_firmware('%s') not found (%d)",
+			PVR_DPF((PVR_DBG_WARNING, "%s: requested firmware('%s') not found (%d)",
 							__func__, pszBVNCString, res));
 			eError = PVRSRV_ERROR_NOT_FOUND;
 		}
 		else
 		{
-			PVR_DPF((PVR_DBG_WARNING, "%s: request_firmware('%s') not ready (%d)",
+			PVR_DPF((PVR_DBG_WARNING, "%s: requested firmware('%s') not ready (%d)",
 							__func__, pszBVNCString, res));
 			eError = PVRSRV_ERROR_NOT_READY;
 		}
@@ -210,6 +214,7 @@ OSLoadFirmware(PVRSRV_DEVICE_NODE *psDeviceNode, const IMG_CHAR *pszBVNCString,
 	}
 
 	psFWImage->psFW = psFW;
+#if !defined(SUPPORT_CUSTOMER_SIGNING)
 	if (pfnVerifyFirmware != NULL && !pfnVerifyFirmware(psFWImage))
 	{
 		release_firmware(psFW);
@@ -217,6 +222,7 @@ OSLoadFirmware(PVRSRV_DEVICE_NODE *psDeviceNode, const IMG_CHAR *pszBVNCString,
 		eError = PVRSRV_ERROR_NOT_AUTHENTICATED;
 		goto err_exit;
 	}
+#endif
 
 	*ppsFWImage = psFWImage;
 	return PVRSRV_OK;

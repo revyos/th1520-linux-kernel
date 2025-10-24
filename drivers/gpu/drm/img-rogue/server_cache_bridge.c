@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -68,10 +65,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 static_assert(CACHE_BATCH_MAX <= IMG_UINT32_MAX,
 	      "CACHE_BATCH_MAX must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
-			 IMG_UINT8 * psCacheOpQueueIN_UI8,
-			 IMG_UINT8 * psCacheOpQueueOUT_UI8, CONNECTION_DATA * psConnection)
+			 IMG_UINT8 *psCacheOpQueueIN_UI8,
+			 IMG_UINT8 *psCacheOpQueueOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_CACHEOPQUEUE *psCacheOpQueueIN =
 	    (PVRSRV_BRIDGE_IN_CACHEOPQUEUE *) IMG_OFFSET_ADDR(psCacheOpQueueIN_UI8, 0);
@@ -87,9 +84,7 @@ PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize =
@@ -116,7 +111,6 @@ PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psCacheOpQueueIN), sizeof(unsigned long));
@@ -132,7 +126,6 @@ PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -284,7 +277,7 @@ CacheOpQueue_exit:
 		{
 
 			/* Unreference the previously looked up handle */
-			if (psPMRInt[i])
+			if (psPMRInt && psPMRInt[i])
 			{
 				PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
 							    hPMRInt2[i],
@@ -301,20 +294,16 @@ CacheOpQueue_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_CACHEOPQUEUE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeCacheOpExec(IMG_UINT32 ui32DispatchTableEntry,
-			IMG_UINT8 * psCacheOpExecIN_UI8,
-			IMG_UINT8 * psCacheOpExecOUT_UI8, CONNECTION_DATA * psConnection)
+			IMG_UINT8 *psCacheOpExecIN_UI8,
+			IMG_UINT8 *psCacheOpExecOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_CACHEOPEXEC *psCacheOpExecIN =
 	    (PVRSRV_BRIDGE_IN_CACHEOPEXEC *) IMG_OFFSET_ADDR(psCacheOpExecIN_UI8, 0);
@@ -360,13 +349,13 @@ CacheOpExec_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_CACHEOPEXEC, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeCacheOpLog(IMG_UINT32 ui32DispatchTableEntry,
-		       IMG_UINT8 * psCacheOpLogIN_UI8,
-		       IMG_UINT8 * psCacheOpLogOUT_UI8, CONNECTION_DATA * psConnection)
+		       IMG_UINT8 *psCacheOpLogIN_UI8,
+		       IMG_UINT8 *psCacheOpLogOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_CACHEOPLOG *psCacheOpLogIN =
 	    (PVRSRV_BRIDGE_IN_CACHEOPLOG *) IMG_OFFSET_ADDR(psCacheOpLogIN_UI8, 0);
@@ -414,7 +403,7 @@ CacheOpLog_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_CACHEOPLOG, eError);
 }
 
 /* ***************************************************************************
@@ -431,13 +420,16 @@ PVRSRV_ERROR InitCACHEBridge(void)
 {
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CACHE, PVRSRV_BRIDGE_CACHE_CACHEOPQUEUE,
-			      PVRSRVBridgeCacheOpQueue, NULL);
+			      PVRSRVBridgeCacheOpQueue, NULL, sizeof(PVRSRV_BRIDGE_IN_CACHEOPQUEUE),
+			      sizeof(PVRSRV_BRIDGE_OUT_CACHEOPQUEUE));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CACHE, PVRSRV_BRIDGE_CACHE_CACHEOPEXEC,
-			      PVRSRVBridgeCacheOpExec, NULL);
+			      PVRSRVBridgeCacheOpExec, NULL, sizeof(PVRSRV_BRIDGE_IN_CACHEOPEXEC),
+			      sizeof(PVRSRV_BRIDGE_OUT_CACHEOPEXEC));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CACHE, PVRSRV_BRIDGE_CACHE_CACHEOPLOG,
-			      PVRSRVBridgeCacheOpLog, NULL);
+			      PVRSRVBridgeCacheOpLog, NULL, sizeof(PVRSRV_BRIDGE_IN_CACHEOPLOG),
+			      sizeof(PVRSRV_BRIDGE_OUT_CACHEOPLOG));
 
 	return PVRSRV_OK;
 }

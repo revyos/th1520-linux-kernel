@@ -49,7 +49,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxdevice.h"
 #include "rgxfwutils.h"
 #include "rgx_fwif_resetframework.h"
-#include "rgxdebug.h"
+#include "rgxdebug_common.h"
 #include "pvr_notifier.h"
 
 #include "sync_server.h"
@@ -72,16 +72,14 @@ typedef struct _RGX_SERVER_TQ_CONTEXT_ RGX_SERVER_TQ_CONTEXT;
 ******************************************************************************/
 PVRSRV_ERROR PVRSRVRGXCreateTransferContextKM(CONNECTION_DATA		*psConnection,
 										   PVRSRV_DEVICE_NODE		*psDeviceNode,
-										   IMG_UINT32				ui32Priority,
+										   IMG_INT32				i32Priority,
 										   IMG_UINT32				ui32FrameworkCommandSize,
 										   IMG_PBYTE				pabyFrameworkCommand,
 										   IMG_HANDLE				hMemCtxPrivData,
 										   IMG_UINT32				ui32PackedCCBSizeU8888,
 										   IMG_UINT32				ui32ContextFlags,
 										   IMG_UINT64				ui64RobustnessAddress,
-										   RGX_SERVER_TQ_CONTEXT	**ppsTransferContext,
-										   PMR						**ppsCLIPMRMem,
-										   PMR						**ppsUSCPMRMem);
+										   RGX_SERVER_TQ_CONTEXT	**ppsTransferContext);
 
 
 /*!
@@ -123,6 +121,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 									PVRSRV_TIMELINE			i3DUpdateTimeline,
 									PVRSRV_FENCE			*pi3DUpdateFence,
 									IMG_CHAR				szFenceName[32],
+									PVRSRV_FENCE			iExportFenceToSignal,
 									IMG_UINT32				*paui32FWCommandSize,
 									IMG_UINT8				**papaui8FWCommand,
 									IMG_UINT32				*pui32TQPrepareFlags,
@@ -134,12 +133,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 PVRSRV_ERROR PVRSRVRGXSetTransferContextPriorityKM(CONNECTION_DATA *psConnection,
                                                    PVRSRV_DEVICE_NODE * psDevNode,
 												   RGX_SERVER_TQ_CONTEXT *psTransferContext,
-												   IMG_UINT32 ui32Priority);
-
-PVRSRV_ERROR PVRSRVRGXSetTransferContextPropertyKM(RGX_SERVER_TQ_CONTEXT *psTransferContext,
-												   RGX_CONTEXT_PROPERTY eContextProperty,
-												   IMG_UINT64 ui64Input,
-												   IMG_UINT64 *pui64Output);
+												   IMG_INT32 i32Priority);
 
 /* Debug - Dump debug info of transfer contexts on this device */
 void DumpTransferCtxtsInfo(PVRSRV_RGXDEV_INFO *psDevInfo,
@@ -149,5 +143,12 @@ void DumpTransferCtxtsInfo(PVRSRV_RGXDEV_INFO *psDevInfo,
 
 /* Debug/Watchdog - check if client transfer contexts are stalled */
 IMG_UINT32 CheckForStalledClientTransferCtxt(PVRSRV_RGXDEV_INFO *psDevInfo);
+
+PVRSRV_ERROR PVRSRVRGXTQGetSharedMemoryKM(
+	CONNECTION_DATA           * psConnection,
+	PVRSRV_DEVICE_NODE        * psDeviceNode,
+	PMR                      ** ppsCLIPMRMem);
+
+PVRSRV_ERROR PVRSRVRGXTQReleaseSharedMemoryKM(PMR * psUSCPMRMem);
 
 #endif /* RGXTRANSFER_H */

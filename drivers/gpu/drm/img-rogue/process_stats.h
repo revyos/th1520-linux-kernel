@@ -48,6 +48,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv_error.h"
 #include "allocmem.h"
 #include "cache_ops.h"
+#include "device.h"
+#include "connection_server.h"
 
 /*
  * The publishing of Process Stats is controlled by the
@@ -71,26 +73,35 @@ typedef enum {
 	PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA,		/* ALLOC_PAGES_PT_LMA mapped to kernel address space */
 	PVRSRV_MEM_ALLOC_TYPE_ALLOC_LMA_PAGES,		/* pages allocated from LMA */
 	PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES,		/* pages allocated from UMA */
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_LMA_PAGES,		/* zombie pages allocated from LMA */
+	PVRSRV_MEM_ALLOC_TYPE_ZOMBIE_UMA_PAGES,		/* zombie pages allocated from UMA */
+#endif
 	PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES,	/* mapped UMA/LMA pages */
 	PVRSRV_MEM_ALLOC_TYPE_UMA_POOL_PAGES,		/* pages in the page pool */
 	PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_IMPORT,       /* dma-buf imports */
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+	PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_ZOMBIE,       /* dma-buf zombie */
+#endif
 
 	/* Must be the last enum...*/
 	PVRSRV_MEM_ALLOC_TYPE_COUNT
 } PVRSRV_MEM_ALLOC_TYPE;
-
 
 /*
  * Functions for managing the processes recorded...
  */
 PVRSRV_ERROR PVRSRVStatsInitialise(void);
 void PVRSRVStatsDestroy(void);
+void PVRSRVStatsDestroyDI(void);
 
 PVRSRV_ERROR PVRSRVStatsRegisterProcess(IMG_HANDLE* phProcessStats);
 
 void PVRSRVStatsDeregisterProcess(IMG_HANDLE hProcessStats);
 
-#define MAX_POWER_STAT_ENTRIES		51
+PVRSRV_ERROR PVRSRVStatsDeviceConnect(PVRSRV_DEVICE_NODE *psDeviceNode);
+
+void PVRSRVStatsDeviceDisconnect(PVRSRV_DEVICE_NODE *psDeviceNode);
 
 /*
  * Functions for recording the statistics...
@@ -100,13 +111,20 @@ void PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 								  void *pvCpuVAddr,
 								  IMG_CPU_PHYADDR sCpuPAddr,
 								  size_t uiBytes,
-								  void *pvPrivateData,
 								  IMG_PID uiPid
 								  DEBUG_MEMSTATS_PARAMS);
 
 void PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 									 IMG_UINT64 ui64Key,
 									 IMG_PID uiPid);
+
+#if defined(SUPPORT_PMR_DEFERRED_FREE)
+void PVRSRVStatsTransferMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eCurrentType,
+                                       PVRSRV_MEM_ALLOC_TYPE eTargetType,
+                                       IMG_UINT64 ui64Key,
+                                       IMG_PID currentPid
+                                       DEBUG_MEMSTATS_PARAMS);
+#endif
 
 void PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 								 size_t uiBytes,
@@ -143,27 +161,29 @@ PVRSRVStatsIncrMemAllocPoolStat(size_t uiBytes);
 void
 PVRSRVStatsDecrMemAllocPoolStat(size_t uiBytes);
 
-void
-PVRSRVStatsUpdateOOMStats(IMG_UINT32 ui32OOMStatType,
-			  IMG_PID pidOwner);
-
 PVRSRV_ERROR
-PVRSRVServerUpdateOOMStats(IMG_UINT32 ui32OOMStatType,
-			   IMG_PID pidOwner);
+PVRSRVStatsUpdateOOMStat(CONNECTION_DATA *psConnection,
+						  PVRSRV_DEVICE_NODE *psDeviceNode,
+						  IMG_UINT32 ui32OOMStatType,
+						  IMG_PID pidOwner);
 
-void PVRSRVStatsUpdateRenderContextStats(IMG_UINT32 ui32TotalNumPartialRenders,
+void PVRSRVStatsUpdateRenderContextStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+										 IMG_UINT32 ui32TotalNumPartialRenders,
 										 IMG_UINT32 ui32TotalNumOutOfMemory,
 										 IMG_UINT32 ui32TotalTAStores,
 										 IMG_UINT32 ui32Total3DStores,
 										 IMG_UINT32 ui32TotalCDMStores,
 										 IMG_UINT32 ui32TotalTDMStores,
+										 IMG_UINT32 ui32NumRayStores,
 										 IMG_PID owner);
 
-void PVRSRVStatsUpdateZSBufferStats(IMG_UINT32 ui32NumReqByApp,
+void PVRSRVStatsUpdateZSBufferStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+									IMG_UINT32 ui32NumReqByApp,
 									IMG_UINT32 ui32NumReqByFW,
 									IMG_PID owner);
 
-void PVRSRVStatsUpdateFreelistStats(IMG_UINT32 ui32NumGrowReqByApp,
+void PVRSRVStatsUpdateFreelistStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+									IMG_UINT32 ui32NumGrowReqByApp,
 									IMG_UINT32 ui32NumGrowReqByFW,
 									IMG_UINT32 ui32InitFLPages,
 									IMG_UINT32 ui32NumHighPages,
@@ -181,43 +201,20 @@ void PVRSRVStatsUpdateCacheOpStats(PVRSRV_CACHE_OP uiCacheOp,
 								   IMG_PID ownerPid);
 #endif
 
-#if defined(PVRSRV_ENABLE_PROCESS_STATS)
-/* Update pre/post power transition timing statistics */
-void InsertPowerTimeStatistic(IMG_UINT64 ui64SysStartTime, IMG_UINT64 ui64SysEndTime,
-                              IMG_UINT64 ui64DevStartTime, IMG_UINT64 ui64DevEndTime,
-                              IMG_BOOL bForced, IMG_BOOL bPowerOn, IMG_BOOL bPrePower);
-
-void InsertPowerTimeStatisticExtraPre(IMG_UINT64 ui64StartTimer, IMG_UINT64 ui64Stoptimer);
-void InsertPowerTimeStatisticExtraPost(IMG_UINT64 ui64StartTimer, IMG_UINT64 ui64StopTimer);
-#else
-/* Update pre/post power transition timing statistics */
-static inline
-void InsertPowerTimeStatistic(IMG_UINT64 ui64SysStartTime, IMG_UINT64 ui64SysEndTime,
-                              IMG_UINT64 ui64DevStartTime, IMG_UINT64 ui64DevEndTime,
-                              IMG_BOOL bForced, IMG_BOOL bPowerOn, IMG_BOOL bPrePower) {}
-static inline
-void InsertPowerTimeStatisticExtraPre(IMG_UINT64 ui64StartTimer, IMG_UINT64 ui64Stoptimer) {}
-
-static inline
-void InsertPowerTimeStatisticExtraPost(IMG_UINT64 ui64StartTimer, IMG_UINT64 ui64StopTimer) {}
-#endif
-
-void SetFirmwareStartTime(IMG_UINT32 ui32TimeStamp);
-
-void SetFirmwareHandshakeIdleTime(IMG_UINT64 ui64Duration);
-
 /* Functions used for calculating the memory usage statistics of a process */
-PVRSRV_ERROR PVRSRVFindProcessMemStats(IMG_PID pid, IMG_UINT32 ui32ArrSize,
-                                       IMG_BOOL bAllProcessStats, IMG_UINT32 *pui32MemoryStats);
+PVRSRV_ERROR PVRSRVFindProcessMemStats(IMG_PID pid,
+                                       IMG_UINT32 ui32ArrSize,
+                                       IMG_BOOL bAllProcessStats,
+                                       IMG_UINT64 *pui64MemoryStats);
 
 typedef struct {
 	IMG_UINT32 ui32Pid;
-	IMG_UINT32 ui32KernelMemUsage;
-	IMG_UINT32 ui32GraphicsMemUsage;
+	IMG_UINT64 ui64KernelMemUsage;
+	IMG_UINT64 ui64GraphicsMemUsage;
 } PVRSRV_PER_PROCESS_MEM_USAGE;
 
-PVRSRV_ERROR PVRSRVGetProcessMemUsage(IMG_UINT32 *pui32TotalMem,
-									  IMG_UINT32 *pui32NumberOfLivePids,
-									  PVRSRV_PER_PROCESS_MEM_USAGE **ppsPerProcessMemUsageData);
+PVRSRV_ERROR PVRSRVGetProcessMemUsage(IMG_UINT64 *pui64TotalMem,
+                                      IMG_UINT32 *pui32NumberOfLivePids,
+                                      PVRSRV_PER_PROCESS_MEM_USAGE **ppsPerProcessMemUsageData);
 
 #endif /* PROCESS_STATS_H */

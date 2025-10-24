@@ -84,13 +84,24 @@ typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_FENCE_CREATE_FN)(PPVRSRV_DEVICE_NODE 
 typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_FENCE_ROLLBACK_DATA_FN)(PVRSRV_FENCE fence_to_rollback, void *finalise_data);
 typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_FENCE_FINALISE_FN)(PVRSRV_FENCE fence_to_finalise, void *finalise_data);
 typedef void (*PFN_SYNC_CHECKPOINT_NOHW_UPDATE_TIMELINES_FN)(void *private_data);
+typedef void (*PFN_SYNC_CHECKPOINT_NOHW_SIGNAL_EXPORT_FENCE_FN)(PVRSRV_FENCE fence_to_signal);
 typedef void (*PFN_SYNC_CHECKPOINT_FREE_CHECKPOINT_LIST_MEM_FN)(void *mem_ptr);
 typedef IMG_UINT32 (*PFN_SYNC_CHECKPOINT_DUMP_INFO_ON_STALLED_UFOS_FN)(IMG_UINT32 num_ufos, IMG_UINT32 *vaddrs);
 #if defined(PDUMP)
+/* Implementers of this callback must take references on checkpoints obtained,
+ * these references must then be dropped by users of the callback once final
+ * access to the checkpoint has completed
+ */
 typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_FENCE_GETCHECKPOINTS_FN)(PVRSRV_FENCE iFence,
 									IMG_UINT32 *puiNumCheckpoints,
 									PSYNC_CHECKPOINT **papsCheckpoints);
 #endif
+typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_EXPORT_FENCE_RESOLVE_FN)(PVRSRV_FENCE iExportFence,
+                                                             PSYNC_CHECKPOINT_CONTEXT checkpoint_context,
+                                                             PSYNC_CHECKPOINT *checkpoint_handle);
+typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_EXPORT_FENCE_ROLLBACK_FN)(PVRSRV_FENCE iExportFence);
+typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_EXPORT_FENCE_FINALISE_FN)(PVRSRV_FENCE iExportFence);
+
 
 #define SYNC_CHECKPOINT_IMPL_MAX_STRLEN 20
 
@@ -101,12 +112,17 @@ typedef struct
 	PFN_SYNC_CHECKPOINT_FENCE_ROLLBACK_DATA_FN pfnFenceDataRollback;
 	PFN_SYNC_CHECKPOINT_FENCE_FINALISE_FN pfnFenceFinalise;
 	PFN_SYNC_CHECKPOINT_NOHW_UPDATE_TIMELINES_FN pfnNoHWUpdateTimelines;
+	PFN_SYNC_CHECKPOINT_NOHW_SIGNAL_EXPORT_FENCE_FN pfnNoHWSignalExpFence;
 	PFN_SYNC_CHECKPOINT_FREE_CHECKPOINT_LIST_MEM_FN pfnFreeCheckpointListMem;
 	PFN_SYNC_CHECKPOINT_DUMP_INFO_ON_STALLED_UFOS_FN pfnDumpInfoOnStalledUFOs;
 	IMG_CHAR pszImplName[SYNC_CHECKPOINT_IMPL_MAX_STRLEN];
 #if defined(PDUMP)
 	PFN_SYNC_CHECKPOINT_FENCE_GETCHECKPOINTS_FN pfnSyncFenceGetCheckpoints;
 #endif
+	PFN_SYNC_CHECKPOINT_EXPORT_FENCE_RESOLVE_FN pfnExportFenceResolve;
+	PFN_SYNC_CHECKPOINT_EXPORT_FENCE_ROLLBACK_FN pfnExportFenceRollback;
+	PFN_SYNC_CHECKPOINT_EXPORT_FENCE_FINALISE_FN pfnExportFenceFinalise;
+
 } PFN_SYNC_CHECKPOINT_STRUCT;
 
 PVRSRV_ERROR SyncCheckpointRegisterFunctions(PFN_SYNC_CHECKPOINT_STRUCT *psSyncCheckpointPfns);
@@ -211,6 +227,45 @@ SyncCheckpointAlloc(PSYNC_CHECKPOINT_CONTEXT psSyncContext,
                     PSYNC_CHECKPOINT *ppsSyncCheckpoint);
 
 /*************************************************************************/ /*!
+@Function       SyncCheckpointAllocProxy
+
+@Description    Allocate a new synchronisation checkpoint on the specified
+                synchronisation checkpoint context for a foreign fence.
+
+@Input          hSyncCheckpointContext  Handle to the synchronisation
+                                        checkpoint context
+
+@Input          hFence                  Fence as passed into pfnFenceResolve
+                                        API, when the API encounters a non-PVR
+                                        fence as part of its input fence. From
+                                        all other places this argument must be
+                                        PVRSRV_NO_FENCE.
+
+@Input          hEnvFenceObjPtr         The environment fence that is used to
+                                        retrieve the FF token.
+
+@Input          bIsPVRSWFence           IMG_BOOL, IMG_TRUE if the fence is a
+                                        software fence.
+
+@Input          pszClassName            Sync checkpoint source annotation
+                                        (will be truncated to at most
+                                         PVRSRV_SYNC_NAME_LENGTH chars)
+
+@Output         ppsSyncCheckpoint       Created synchronisation checkpoint
+
+@Return         PVRSRV_OK if the synchronisation checkpoint was
+                successfully created
+*/
+/*****************************************************************************/
+PVRSRV_ERROR
+SyncCheckpointAllocProxy(PSYNC_CHECKPOINT_CONTEXT psSyncContext,
+                         PVRSRV_FENCE hFence,
+                         IMG_HANDLE hEnvFenceObjPtr,
+                         IMG_BOOL bIsPVRSWFence,
+                         const IMG_CHAR *pszCheckpointName,
+                         PSYNC_CHECKPOINT *ppsSyncCheckpoint);
+
+/*************************************************************************/ /*!
 @Function       SyncCheckpointFree
 
 @Description    Free a synchronisation checkpoint
@@ -243,7 +298,7 @@ SyncCheckpointSignal(PSYNC_CHECKPOINT psSyncCheckpoint, IMG_UINT32 ui32FenceSync
 /*************************************************************************/ /*!
 @Function       SyncCheckpointSignalNoHW
 
-@Description    Signal the synchronisation checkpoint in NO_HARWARE build
+@Description    Signal the synchronisation checkpoint in NO_HARDWARE build
 
 @Input          psSyncCheckpoint        The synchronisation checkpoint to signal
 
@@ -426,6 +481,51 @@ SyncCheckpointResolveFence(PSYNC_CHECKPOINT_CONTEXT psSyncCheckpointContext,
                            PDUMP_FLAGS_T ui32PDumpFlags);
 
 /*************************************************************************/ /*!
+@Function       SyncCheckpointResolveExportFence
+
+@Description    Resolve an export fence, returning the sync checkpoint
+                that fence contains.
+                This function in turn calls a function provided by the
+                sync implementation.
+
+@Input          hExportFence            The export fence to be resolved
+
+@Input          psSyncCheckpointContext The context in which to create the
+                                        new sync checkpoint for the export fence
+
+@Output         ppsSyncCheckpoint       The sync checkpoint the fence
+                                        contains
+
+@Return         PVRSRV_OK if a valid fence was provided.
+                PVRSRV_ERROR_SYNC_NATIVESYNC_NOT_REGISTERED if the OS native
+                sync has not registered a callback function.
+*/
+/*****************************************************************************/
+PVRSRV_ERROR
+SyncCheckpointResolveExportFence(PVRSRV_FENCE hExportFence,
+                           PSYNC_CHECKPOINT_CONTEXT psSyncCheckpointContext,
+                           PSYNC_CHECKPOINT *ppsSyncCheckpoint,
+                           PDUMP_FLAGS_T ui32PDumpFlags);
+
+/*************************************************************************/ /*!
+@Function       SyncCheckpointRollbackExportFence
+
+@Description    Rollback an export fence, freeing the sync checkpoint
+                that fence was assigned.
+                This function in turn calls a function provided by the
+                sync implementation.
+
+@Input          hExportFence            The export fence to be rolled back
+
+@Return         PVRSRV_OK if a valid fence was provided.
+                PVRSRV_ERROR_SYNC_NATIVESYNC_NOT_REGISTERED if the OS native
+                sync has not registered a callback function.
+*/
+/*****************************************************************************/
+PVRSRV_ERROR
+SyncCheckpointRollbackExportFence(PVRSRV_FENCE hExportFence);
+
+/*************************************************************************/ /*!
 @Function       SyncCheckpointCreateFence
 
 @Description    Create a fence containing a single sync checkpoint.
@@ -531,6 +631,29 @@ SyncCheckpointFinaliseFence(PPVRSRV_DEVICE_NODE psDevNode,
                             const IMG_CHAR *pszName);
 
 /*************************************************************************/ /*!
+@Function       SyncCheckpointFinaliseExportFence
+
+@Description    'Finalise' the export fence specified (performs any actions
+                the underlying implementation may need to perform after any
+                potential rollback opportunities have passed)
+                This function in turn calls a function provided by the
+                OS native sync implementation - if the native sync
+                implementation does not need to perform any actions at
+                this time, this function does not need to be registered.
+
+@Input          hFence                  Export fence to be 'finalised'
+
+@Return         PVRSRV_OK if a valid fence and finalise data were provided.
+                PVRSRV_ERROR_INVALID_PARAMS if an invalid fence or finalise
+                data were provided.
+                PVRSRV_ERROR_SYNC_NATIVESYNC_NOT_REGISTERED if the OS native
+                sync has not registered a callback function (permitted).
+*/
+/*****************************************************************************/
+PVRSRV_ERROR
+SyncCheckpointFinaliseExportFence(PVRSRV_FENCE hExportFence);
+
+/*************************************************************************/ /*!
 @Function       SyncCheckpointFreeCheckpointListMem
 
 @Description    Free memory the memory which was allocated by the sync
@@ -569,6 +692,27 @@ SyncCheckpointFreeCheckpointListMem(void *pvCheckpointListMem);
 /*****************************************************************************/
 PVRSRV_ERROR
 SyncCheckpointNoHWUpdateTimelines(void *pvPrivateData);
+
+/*************************************************************************/ /*!
+@Function       SyncCheckpointNoHWSignalExportFence
+
+@Description    Called by the DDK in a NO_HARDWARE build only.
+                After syncs have been manually signalled by the DDK, this
+                function is called to allow the OS native sync implementation
+                to signal the export fence (as the usual callback notification
+                of signalled checkpoints is not supported for NO_HARDWARE).
+                This function in turn calls a function provided by the
+                OS native sync implementation.
+
+@Input          iExportFenceToSignal     The export fence to signal.
+
+@Return         PVRSRV_ERROR_SYNC_NATIVESYNC_NOT_REGISTERED if the OS native
+                sync has not registered a callback function, otherwise
+                PVRSRV_OK.
+*/
+/*****************************************************************************/
+PVRSRV_ERROR
+SyncCheckpointNoHWSignalExportFence(PVRSRV_FENCE iExportFenceToSignal);
 
 /*************************************************************************/ /*!
 @Function       SyncCheckpointDumpInfoOnStalledUFOs
@@ -663,4 +807,69 @@ PVRSRV_ERROR PVRSRVSyncCheckpointSignalledPDumpPolKM(PVRSRV_FENCE hFence);
 
 #endif
 
-#endif	/* SYNC_CHECKPOINT_H */
+/*************************************************************************/ /*!
+@Function       SyncCheckpointCommonDeviceIDs
+
+@Description    Determine if the DeviceIDs referenced by the checkpoint context
+                and device reference are to the same physical device.
+
+@Input          psSyncContext  Handle to the synchronisation checkpoint context
+
+@Input          hDevRef        Handle to the device reference to check against
+
+@Return         IMG_TRUE if devices refer to the same device, or if one of the
+                parameters is NULL.
+                IMG_FALSE if the two references are to different physical
+                devices.
+*/
+/*****************************************************************************/
+IMG_BOOL SyncCheckpointCommonDeviceIDs(PSYNC_CHECKPOINT_CONTEXT psSyncContext,
+                                       IMG_HANDLE hDevRef);
+
+/*************************************************************************/ /*!
+@Function       SyncCheckpointGetCounters
+
+@Description    Return the Current In Use and Max In Use Sync Checkpoint
+                counters for the specified sync context.
+
+@Input          psDevNode      Handle to the device-node
+
+@Output         puiInUse       Number of Sync CPs currently in-use
+
+@Output         puiMax         Maximum number of Sync CPs allocated
+
+@Output         puiXDInUse     Number of X-D Sync CPs currently in-use
+
+@Output         puiXDMax       Maximum number of X-D Sync CPs used
+
+@Return         PVRSRV_OK if a valid sync checkpoint context is passed.
+*/
+/*****************************************************************************/
+PVRSRV_ERROR SyncCheckpointGetCounters(PPVRSRV_DEVICE_NODE psDevNode,
+                                       IMG_UINT32 *puiInUse,
+                                       IMG_UINT32 *puiMax,
+                                       IMG_UINT32 *puiXDInUse,
+                                       IMG_UINT32 *puiXDMax);
+
+/*************************************************************************/ /*!
+@Function       SyncCheckpointGetDevIDs
+
+@Description    Return the OS-specific Kernel Device Id and DDK internal
+                device Id associated with this synchronisation checkpoint.
+
+@Input          psSyncCheckpoint   Synchronisation checkpoint to get the
+                                   associated device ID for.
+
+@Output         piKernelDevId      Returned Kernel Device Id
+
+@Output         puiInternalDevId   Returned Internal Device Id
+
+@Return         PVRSRV_OK if valid parameters
+                PVRSRV_ERROR_INVALID_PARAMS otherwise.
+*/
+/*****************************************************************************/
+
+PVRSRV_ERROR SyncCheckpointGetDevIDs(PSYNC_CHECKPOINT psSyncCheckpoint,
+                                     IMG_INT32 *piKernelDevId,
+                                     IMG_UINT32 *puiInternalDevId);
+#endif /* SYNC_CHECKPOINT_H */

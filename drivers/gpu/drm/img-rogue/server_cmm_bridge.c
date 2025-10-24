@@ -54,9 +54,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -75,11 +72,11 @@ static PVRSRV_ERROR _DevmemIntExportCtxpsContextExportIntRelease(void *pvData)
 	return eError;
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevmemIntExportCtx(IMG_UINT32 ui32DispatchTableEntry,
-			       IMG_UINT8 * psDevmemIntExportCtxIN_UI8,
-			       IMG_UINT8 * psDevmemIntExportCtxOUT_UI8,
-			       CONNECTION_DATA * psConnection)
+			       IMG_UINT8 *psDevmemIntExportCtxIN_UI8,
+			       IMG_UINT8 *psDevmemIntExportCtxOUT_UI8,
+			       CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DEVMEMINTEXPORTCTX *psDevmemIntExportCtxIN =
 	    (PVRSRV_BRIDGE_IN_DEVMEMINTEXPORTCTX *) IMG_OFFSET_ADDR(psDevmemIntExportCtxIN_UI8, 0);
@@ -179,14 +176,14 @@ DevmemIntExportCtx_exit:
 		}
 	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVMEMINTEXPORTCTX, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevmemIntUnexportCtx(IMG_UINT32 ui32DispatchTableEntry,
-				 IMG_UINT8 * psDevmemIntUnexportCtxIN_UI8,
-				 IMG_UINT8 * psDevmemIntUnexportCtxOUT_UI8,
-				 CONNECTION_DATA * psConnection)
+				 IMG_UINT8 *psDevmemIntUnexportCtxIN_UI8,
+				 IMG_UINT8 *psDevmemIntUnexportCtxOUT_UI8,
+				 CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DEVMEMINTUNEXPORTCTX *psDevmemIntUnexportCtxIN =
 	    (PVRSRV_BRIDGE_IN_DEVMEMINTUNEXPORTCTX *) IMG_OFFSET_ADDR(psDevmemIntUnexportCtxIN_UI8,
@@ -218,7 +215,7 @@ PVRSRVBridgeDevmemIntUnexportCtx(IMG_UINT32 ui32DispatchTableEntry,
 
 DevmemIntUnexportCtx_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVMEMINTUNEXPORTCTX, eError);
 }
 
 static PVRSRV_ERROR _DevmemIntAcquireRemoteCtxpsContextIntRelease(void *pvData)
@@ -228,11 +225,11 @@ static PVRSRV_ERROR _DevmemIntAcquireRemoteCtxpsContextIntRelease(void *pvData)
 	return eError;
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevmemIntAcquireRemoteCtx(IMG_UINT32 ui32DispatchTableEntry,
-				      IMG_UINT8 * psDevmemIntAcquireRemoteCtxIN_UI8,
-				      IMG_UINT8 * psDevmemIntAcquireRemoteCtxOUT_UI8,
-				      CONNECTION_DATA * psConnection)
+				      IMG_UINT8 *psDevmemIntAcquireRemoteCtxIN_UI8,
+				      IMG_UINT8 *psDevmemIntAcquireRemoteCtxOUT_UI8,
+				      CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DEVMEMINTACQUIREREMOTECTX *psDevmemIntAcquireRemoteCtxIN =
 	    (PVRSRV_BRIDGE_IN_DEVMEMINTACQUIREREMOTECTX *)
@@ -340,20 +337,19 @@ DevmemIntAcquireRemoteCtx_exit:
 			 * This should never fail... */
 			PVR_ASSERT((eError == PVRSRV_OK) || (eError == PVRSRV_ERROR_RETRY));
 
-			/* Avoid freeing/destroying/releasing the resource a second time below */
-			psContextInt = NULL;
 			/* Release now we have cleaned up creation handles. */
 			UnlockHandle(psConnection->psHandleBase);
 
 		}
 
-		if (psContextInt)
+		else if (psContextInt)
 		{
 			DevmemIntCtxDestroy(psContextInt);
 		}
+
 	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVMEMINTACQUIREREMOTECTX, eError);
 }
 
 /* ***************************************************************************
@@ -373,13 +369,19 @@ PVRSRV_ERROR InitCMMBridge(void)
 {
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CMM, PVRSRV_BRIDGE_CMM_DEVMEMINTEXPORTCTX,
-			      PVRSRVBridgeDevmemIntExportCtx, NULL);
+			      PVRSRVBridgeDevmemIntExportCtx, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVMEMINTEXPORTCTX),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVMEMINTEXPORTCTX));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CMM, PVRSRV_BRIDGE_CMM_DEVMEMINTUNEXPORTCTX,
-			      PVRSRVBridgeDevmemIntUnexportCtx, NULL);
+			      PVRSRVBridgeDevmemIntUnexportCtx, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVMEMINTUNEXPORTCTX),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVMEMINTUNEXPORTCTX));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_CMM, PVRSRV_BRIDGE_CMM_DEVMEMINTACQUIREREMOTECTX,
-			      PVRSRVBridgeDevmemIntAcquireRemoteCtx, NULL);
+			      PVRSRVBridgeDevmemIntAcquireRemoteCtx, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVMEMINTACQUIREREMOTECTX),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVMEMINTACQUIREREMOTECTX));
 
 	return PVRSRV_OK;
 }

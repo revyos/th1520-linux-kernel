@@ -72,7 +72,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PVRSRV_BRIDGE_SRVCORE_FINDPROCESSMEMSTATS			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+14
 #define PVRSRV_BRIDGE_SRVCORE_ACQUIREINFOPAGE			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+15
 #define PVRSRV_BRIDGE_SRVCORE_RELEASEINFOPAGE			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+16
-#define PVRSRV_BRIDGE_SRVCORE_CMD_LAST			(PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+16)
+#define PVRSRV_BRIDGE_SRVCORE_GETSLCSIZE			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+17
+#define PVRSRV_BRIDGE_SRVCORE_GETSOCFREQ			PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+18
+#define PVRSRV_BRIDGE_SRVCORE_CMD_LAST			(PVRSRV_BRIDGE_SRVCORE_CMD_FIRST+18)
 
 /*******************************************
             Connect
@@ -320,16 +322,16 @@ typedef struct PVRSRV_BRIDGE_OUT_EVENTOBJECTWAITTIMEOUT_TAG
 /* Bridge in structure for FindProcessMemStats */
 typedef struct PVRSRV_BRIDGE_IN_FINDPROCESSMEMSTATS_TAG
 {
-	IMG_UINT32 *pui32MemStatsArray;
-	IMG_BOOL bbAllProcessStats;
+	IMG_UINT64 *pui64MemStatsArray;
 	IMG_UINT32 ui32ArrSize;
 	IMG_UINT32 ui32PID;
+	IMG_BOOL bbAllProcessStats;
 } __packed PVRSRV_BRIDGE_IN_FINDPROCESSMEMSTATS;
 
 /* Bridge out structure for FindProcessMemStats */
 typedef struct PVRSRV_BRIDGE_OUT_FINDPROCESSMEMSTATS_TAG
 {
-	IMG_UINT32 *pui32MemStatsArray;
+	IMG_UINT64 *pui64MemStatsArray;
 	PVRSRV_ERROR eError;
 } __packed PVRSRV_BRIDGE_OUT_FINDPROCESSMEMSTATS;
 
@@ -365,5 +367,39 @@ typedef struct PVRSRV_BRIDGE_OUT_RELEASEINFOPAGE_TAG
 {
 	PVRSRV_ERROR eError;
 } __packed PVRSRV_BRIDGE_OUT_RELEASEINFOPAGE;
+
+/*******************************************
+            GetSLCSize
+ *******************************************/
+
+/* Bridge in structure for GetSLCSize */
+typedef struct PVRSRV_BRIDGE_IN_GETSLCSIZE_TAG
+{
+	IMG_UINT32 ui32EmptyStructPlaceholder;
+} __packed PVRSRV_BRIDGE_IN_GETSLCSIZE;
+
+/* Bridge out structure for GetSLCSize */
+typedef struct PVRSRV_BRIDGE_OUT_GETSLCSIZE_TAG
+{
+	PVRSRV_ERROR eError;
+	IMG_UINT32 ui32SLCSizeInBytes;
+} __packed PVRSRV_BRIDGE_OUT_GETSLCSIZE;
+
+/*******************************************
+            GetSocFreq
+ *******************************************/
+
+/* Bridge in structure for GetSocFreq */
+typedef struct PVRSRV_BRIDGE_IN_GETSOCFREQ_TAG
+{
+	IMG_UINT32 ui32EmptyStructPlaceholder;
+} __packed PVRSRV_BRIDGE_IN_GETSOCFREQ;
+
+/* Bridge out structure for GetSocFreq */
+typedef struct PVRSRV_BRIDGE_OUT_GETSOCFREQ_TAG
+{
+	PVRSRV_ERROR eError;
+	IMG_UINT32 ui32SocFreq;
+} __packed PVRSRV_BRIDGE_OUT_GETSOCFREQ;
 
 #endif /* COMMON_SRVCORE_BRIDGE_H */

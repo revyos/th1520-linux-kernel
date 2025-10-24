@@ -47,9 +47,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxhwperf_common.h"
 
 /******************************************************************************
- * RGX HW Performance Profiling API(s) Rogue specific
+ * RGX HW Performance Profiling API(s)
  *****************************************************************************/
 
+#if defined(RGX_FEATURE_HWPERF_ROGUE)
 PVRSRV_ERROR PVRSRVRGXConfigMuxHWPerfCountersKM(
 	CONNECTION_DATA               *psConnection,
 	PVRSRV_DEVICE_NODE            *psDeviceNode,
@@ -63,6 +64,7 @@ PVRSRV_ERROR PVRSRVRGXConfigCustomCountersKM(
 	IMG_UINT16           ui16CustomBlockID,
 	IMG_UINT16           ui16NumCustomCounters,
 	IMG_UINT32         * pui32CustomCounterIDs);
+#endif
 
 PVRSRV_ERROR PVRSRVRGXConfigureHWPerfBlocksKM(
 	CONNECTION_DATA       * psConnection,
@@ -70,5 +72,38 @@ PVRSRV_ERROR PVRSRVRGXConfigureHWPerfBlocksKM(
 	IMG_UINT32            ui32CtrlWord,
 	IMG_UINT32            ui32ArrayLen,
 	RGX_HWPERF_CONFIG_CNTBLK * psBlockConfigs);
+
+#if defined(RGX_FEATURE_HWPERF_ROGUE)
+PVRSRV_ERROR PVRSRVRGXGetConfiguredHWPerfMuxCountersKM(CONNECTION_DATA *psConnection,
+                                                       PVRSRV_DEVICE_NODE *psDeviceNode,
+                                                       const IMG_UINT32 ui32BlockID,
+                                                       RGX_HWPERF_CONFIG_MUX_CNTBLK *psConfiguredMuxCounters);
+
+PVRSRV_ERROR PVRSRVRGXGetConfiguredHWPerfMuxCounters(PVRSRV_DEVICE_NODE *psDevNode,
+                                                     RGXFWIF_HWPERF_CTL *psHWPerfCtl,
+                                                     IMG_UINT32 ui32BlockID,
+                                                     RGX_HWPERF_CONFIG_MUX_CNTBLK *psConfiguredMuxCounters);
+#endif
+
+PVRSRV_ERROR PVRSRVRGXGetConfiguredHWPerfCounters(PVRSRV_DEVICE_NODE *psDevNode,
+                                                  RGXFWIF_HWPERF_CTL *psHWPerfCtl,
+                                                  IMG_UINT32 ui32BlockID,
+                                                  RGX_HWPERF_CONFIG_CNTBLK *psConfiguredCounters);
+
+PVRSRV_ERROR PVRSRVRGXGetEnabledHWPerfBlocks(PVRSRV_DEVICE_NODE *psDevNode,
+                                             RGXFWIF_HWPERF_CTL *psHWPerfCtl,
+                                             IMG_UINT32 ui32ArrayLength,
+                                             IMG_UINT32 *pui32BlockCount,
+                                             IMG_UINT32 *pui32EnabledBlockIDs);
+
+typedef struct HWPERF_STREAM_DESC_TAG HWPERF_STREAM_DESC;
+
+PVRSRV_ERROR PVRSRVRGXOpenHWPerfClientStreamKM(CONNECTION_DATA *psConnection,
+                                               PVRSRV_DEVICE_NODE *psDeviceNode,
+                                               HWPERF_STREAM_DESC **ppsSD);
+PVRSRV_ERROR PVRSRVRGXCloseHWPerfClientStreamKM(HWPERF_STREAM_DESC *psSD);
+PVRSRV_ERROR PVRSRVRGXWriteHWPerfClientEventKM(HWPERF_STREAM_DESC *psSD,
+                                               IMG_UINT32 uiSize,
+                                               IMG_BYTE *puiData);
 
 #endif /* RGXHWPERF_H_ */

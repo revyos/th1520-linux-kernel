@@ -67,24 +67,27 @@ IMG_INTERNAL PVRSRV_ERROR BridgeRIWritePMREntry(IMG_HANDLE hBridge, IMG_HANDLE h
 IMG_INTERNAL PVRSRV_ERROR BridgeRIWriteMEMDESCEntry(IMG_HANDLE hBridge,
 						    IMG_HANDLE hPMRHandle,
 						    IMG_UINT32 ui32TextBSize,
-						    const IMG_CHAR * puiTextB,
+						    const IMG_CHAR *puiTextB,
 						    IMG_UINT64 ui64Offset,
 						    IMG_UINT64 ui64Size,
-						    IMG_BOOL bIsImport,
-						    IMG_BOOL bIsSuballoc, IMG_HANDLE * phRIHandle)
+						    IMG_UINT64 ui64Flags, IMG_HANDLE *phRIHandle)
 {
 	PVRSRV_ERROR eError;
 	PMR *psPMRHandleInt;
 	RI_HANDLE psRIHandleInt = NULL;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
 
 	psPMRHandleInt = (PMR *) hPMRHandle;
 
 	eError =
-	    RIWriteMEMDESCEntryKM(psPMRHandleInt,
+	    RIWriteMEMDESCEntryKM(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
+				  psPMRHandleInt,
 				  ui32TextBSize,
-				  puiTextB,
-				  ui64Offset, ui64Size, bIsImport, bIsSuballoc, &psRIHandleInt);
+				  puiTextB, ui64Offset, ui64Size, ui64Flags, &psRIHandleInt);
+
+	if (eError != PVRSRV_OK)
+	{
+		return eError;
+	}
 
 	*phRIHandle = psRIHandleInt;
 	return eError;
@@ -92,17 +95,17 @@ IMG_INTERNAL PVRSRV_ERROR BridgeRIWriteMEMDESCEntry(IMG_HANDLE hBridge,
 
 IMG_INTERNAL PVRSRV_ERROR BridgeRIWriteProcListEntry(IMG_HANDLE hBridge,
 						     IMG_UINT32 ui32TextBSize,
-						     const IMG_CHAR * puiTextB,
+						     const IMG_CHAR *puiTextB,
 						     IMG_UINT64 ui64Size,
 						     IMG_UINT64 ui64DevVAddr,
-						     IMG_HANDLE * phRIHandle)
+						     IMG_HANDLE *phRIHandle)
 {
 	PVRSRV_ERROR eError;
 	RI_HANDLE psRIHandleInt = NULL;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
 
 	eError =
-	    RIWriteProcListEntryKM(ui32TextBSize, puiTextB, ui64Size, ui64DevVAddr, &psRIHandleInt);
+	    RIWriteProcListEntryKM(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
+				   ui32TextBSize, puiTextB, ui64Size, ui64DevVAddr, &psRIHandleInt);
 
 	*phRIHandle = psRIHandleInt;
 	return eError;

@@ -51,7 +51,7 @@ extern "C" {
 #include "img_defs.h"
 
 /*! Maximum text string length including the null byte */
-#define PRVSRVRI_MAX_TEXT_LENGTH	20U
+#define PVRSRVRI_MAX_TEXT_LENGTH	20U
 
 /* PID used to hold PMR allocations which are driver-wide (i.e. have a lifetime
  * longer than an application process)

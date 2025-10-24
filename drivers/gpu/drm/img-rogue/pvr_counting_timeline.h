@@ -43,7 +43,7 @@
 #if !defined(__PVR_COUNTING_TIMELINE_H__)
 #define __PVR_COUNTING_TIMELINE_H__
 
-#include "pvr_linux_fence.h"
+#include <linux/dma-fence.h>
 
 struct pvr_counting_fence_timeline;
 

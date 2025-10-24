@@ -49,7 +49,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxdevice.h"
 #include "rgxfwutils.h"
 #include "rgx_fwif_resetframework.h"
-#include "rgxdebug.h"
+#include "rgxdebug_common.h"
 #include "pvr_notifier.h"
 
 #include "sync_server.h"
@@ -61,21 +61,21 @@ typedef struct _RGX_SERVER_TQ_TDM_CONTEXT_ RGX_SERVER_TQ_TDM_CONTEXT;
 PVRSRV_ERROR PVRSRVRGXTDMCreateTransferContextKM(
 	CONNECTION_DATA           * psConnection,
 	PVRSRV_DEVICE_NODE        * psDeviceNode,
-	IMG_UINT32                  ui32Priority,
+	IMG_INT32                   i32Priority,
 	IMG_UINT32                  ui32FrameworkCommandSize,
 	IMG_PBYTE                   pabyFrameworkCommand,
 	IMG_HANDLE                  hMemCtxPrivData,
 	IMG_UINT32					ui32PackedCCBSizeU88,
 	IMG_UINT32                  ui32ContextFlags,
 	IMG_UINT64					ui64RobustnessAddress,
+	IMG_UINT32                  ui32MaxDeadlineMS,
 	RGX_SERVER_TQ_TDM_CONTEXT **ppsTransferContext);
 
 
 PVRSRV_ERROR PVRSRVRGXTDMGetSharedMemoryKM(
 	CONNECTION_DATA           * psConnection,
 	PVRSRV_DEVICE_NODE        * psDeviceNode,
-	PMR                      ** ppsCLIPMRMem,
-	PMR                      ** ppsUSCPMRMem);
+	PMR                      ** ppsCLIPMRMem);
 
 
 PVRSRV_ERROR PVRSRVRGXTDMReleaseSharedMemoryKM(PMR * psUSCPMRMem);
@@ -95,6 +95,7 @@ PVRSRV_ERROR PVRSRVRGXTDMSubmitTransferKM(
 	PVRSRV_TIMELINE             iUpdateTimeline,
 	PVRSRV_FENCE              * piUpdateFence,
 	IMG_CHAR                    szUpdateFenceName[PVRSRV_SYNC_NAME_LENGTH],
+	PVRSRV_FENCE                iExportFenceToSignal,
 	IMG_UINT32                  ui32FWCommandSize,
 	IMG_UINT8                 * pui8FWCommand,
 	IMG_UINT32                  ui32ExtJobRef,
@@ -112,12 +113,7 @@ PVRSRV_ERROR PVRSRVRGXTDMNotifyWriteOffsetUpdateKM(
 PVRSRV_ERROR PVRSRVRGXTDMSetTransferContextPriorityKM(CONNECTION_DATA *psConnection,
                                                    PVRSRV_DEVICE_NODE * psDeviceNode,
 												   RGX_SERVER_TQ_TDM_CONTEXT *psTransferContext,
-												   IMG_UINT32 ui32Priority);
-
-PVRSRV_ERROR PVRSRVRGXTDMSetTransferContextPropertyKM(RGX_SERVER_TQ_TDM_CONTEXT *psTransferContext,
-													 RGX_CONTEXT_PROPERTY eContextProperty,
-													 IMG_UINT64 ui64Input,
-													 IMG_UINT64 *pui64Output);
+												   IMG_INT32 i32Priority);
 
 /* Debug - Dump debug info of TDM transfer contexts on this device */
 void DumpTDMTransferCtxtsInfo(PVRSRV_RGXDEV_INFO *psDevInfo,

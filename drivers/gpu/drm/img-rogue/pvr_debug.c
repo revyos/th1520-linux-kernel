@@ -42,6 +42,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
 #include <linux/sched.h>
+#include <linux/pid.h>
 #include <linux/moduleparam.h>
 
 #include "img_types.h"
@@ -99,7 +100,7 @@ AddToBufferCCB(const IMG_CHAR *pszFileName, IMG_UINT32 ui32Line,
 
 	do_gettimeofday(&gsDebugCCB[giOffset].sTimeVal);
 
-	OSStringLCopy(gsDebugCCB[giOffset].pcMesg, szBuffer,
+	OSStringSafeCopy(gsDebugCCB[giOffset].pcMesg, szBuffer,
 	              PVRSRV_DEBUG_CCB_MESG_MAX);
 
 	giOffset = (giOffset + 1) % PVRSRV_DEBUG_CCB_MAX;
@@ -159,7 +160,7 @@ void PVRSRVDebugPrintfDumpCCB(void)
 
 #endif /* defined(PVRSRV_DEBUG_CCB_MAX) */
 
-static IMG_UINT32 gPVRDebugLevel =
+static IMG_UINT32 PVRDebugLevel =
 	(
 	 DBGPRIV_FATAL | DBGPRIV_ERROR | DBGPRIV_WARNING
 #if defined(PVRSRV_DEBUG_CCB_MAX)
@@ -170,23 +171,23 @@ static IMG_UINT32 gPVRDebugLevel =
 #endif /* defined(PVR_DPF_ADHOC_DEBUG_ON) */
 	);
 
-module_param(gPVRDebugLevel, uint, 0644);
-MODULE_PARM_DESC(gPVRDebugLevel,
+module_param(PVRDebugLevel, uint, 0644);
+MODULE_PARM_DESC(PVRDebugLevel,
                  "Sets the level of debug output (default 0x7)");
 
 IMG_UINT32 OSDebugLevel(void)
 {
-	return gPVRDebugLevel;
+	return PVRDebugLevel;
 }
 
 void OSSetDebugLevel(IMG_UINT32 ui32DebugLevel)
 {
-	gPVRDebugLevel = ui32DebugLevel;
+	PVRDebugLevel = ui32DebugLevel;
 }
 
 IMG_BOOL OSIsDebugLevel(IMG_UINT32 ui32DebugLevel)
 {
-	return (gPVRDebugLevel & ui32DebugLevel) != 0;
+	return (PVRDebugLevel & ui32DebugLevel) != 0;
 }
 
 #else /* defined(PVRSRV_NEED_PVR_DPF) */
@@ -240,21 +241,12 @@ static IMG_BOOL VBAppend(IMG_CHAR *pszBuf, IMG_UINT32 ui32BufSiz, const IMG_CHAR
 	return i32Len < 0 || i32Len >= (IMG_INT32)ui32Space;
 }
 
-/*************************************************************************/ /*!
-@Function       PVRSRVReleasePrintf
-@Description    To output an important message to the user in release builds
-@Input          pszFormat   The message format string
-@Input          ...         Zero or more arguments for use by the format string
-*/ /**************************************************************************/
-void PVRSRVReleasePrintf(const IMG_CHAR *pszFormat, ...)
+void PVRSRVReleasePrintfVArgs(const IMG_CHAR *pszFormat, va_list vaArgs)
 {
-	va_list vaArgs;
 	unsigned long ulLockFlags = 0;
 	IMG_CHAR *pszBuf = gszBuffer;
 	IMG_UINT32 ui32BufSiz = sizeof(gszBuffer);
 	IMG_INT32  result;
-
-	va_start(vaArgs, pszFormat);
 
 	spin_lock_irqsave(&gsDebugLock, ulLockFlags);
 
@@ -272,6 +264,20 @@ void PVRSRVReleasePrintf(const IMG_CHAR *pszFormat, ...)
 	}
 
 	spin_unlock_irqrestore(&gsDebugLock, ulLockFlags);
+}
+
+/*************************************************************************/ /*!
+@Function       PVRSRVReleasePrintf
+@Description    To output an important message to the user in release builds
+@Input          pszFormat   The message format string
+@Input          ...         Zero or more arguments for use by the format string
+*/ /**************************************************************************/
+void PVRSRVReleasePrintf(const IMG_CHAR *pszFormat, ...)
+{
+	va_list vaArgs;
+
+	va_start(vaArgs, pszFormat);
+	PVRSRVReleasePrintfVArgs(pszFormat, vaArgs);
 	va_end(vaArgs);
 }
 
@@ -359,7 +365,7 @@ void PVRSRVDebugPrintf(IMG_UINT32 ui32DebugLevel,
 	IMG_CHAR *pszBuf = gszBuffer;
 	IMG_UINT32 ui32BufSiz = sizeof(gszBuffer);
 
-	if (!(gPVRDebugLevel & ui32DebugLevel))
+	if (!(PVRDebugLevel & ui32DebugLevel))
 	{
 		return;
 	}
@@ -372,34 +378,34 @@ void PVRSRVDebugPrintf(IMG_UINT32 ui32DebugLevel,
 	{
 		case DBGPRIV_FATAL:
 		{
-			OSStringLCopy(pszBuf, "PVR_K:(Fatal): ", ui32BufSiz);
+			OSStringSafeCopy(pszBuf, "PVR_K:(Fatal): ", ui32BufSiz);
 			PVRSRV_REPORT_ERROR();
 			break;
 		}
 		case DBGPRIV_ERROR:
 		{
-			OSStringLCopy(pszBuf, "PVR_K:(Error): ", ui32BufSiz);
+			OSStringSafeCopy(pszBuf, "PVR_K:(Error): ", ui32BufSiz);
 			PVRSRV_REPORT_ERROR();
 			break;
 		}
 		case DBGPRIV_WARNING:
 		{
-			OSStringLCopy(pszBuf, "PVR_K:(Warn):  ", ui32BufSiz);
+			OSStringSafeCopy(pszBuf, "PVR_K:(Warn):  ", ui32BufSiz);
 			break;
 		}
 		case DBGPRIV_MESSAGE:
 		{
-			OSStringLCopy(pszBuf, "PVR_K:(Mesg):  ", ui32BufSiz);
+			OSStringSafeCopy(pszBuf, "PVR_K:(Mesg):  ", ui32BufSiz);
 			break;
 		}
 		case DBGPRIV_VERBOSE:
 		{
-			OSStringLCopy(pszBuf, "PVR_K:(Verb):  ", ui32BufSiz);
+			OSStringSafeCopy(pszBuf, "PVR_K:(Verb):  ", ui32BufSiz);
 			break;
 		}
 		case DBGPRIV_DEBUG:
 		{
-			OSStringLCopy(pszBuf, "PVR_K:(Debug): ", ui32BufSiz);
+			OSStringSafeCopy(pszBuf, "PVR_K:(Debug): ", ui32BufSiz);
 			break;
 		}
 		case DBGPRIV_CALLTRACE:
@@ -407,7 +413,7 @@ void PVRSRVDebugPrintf(IMG_UINT32 ui32DebugLevel,
 		case DBGPRIV_BUFFERED:
 		default:
 		{
-			OSStringLCopy(pszBuf, "PVR_K: ", ui32BufSiz);
+			OSStringSafeCopy(pszBuf, "PVR_K: ", ui32BufSiz);
 			break;
 		}
 	}

@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -67,11 +64,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXSetRegConfigType(IMG_UINT32 ui32DispatchTableEntry,
-				IMG_UINT8 * psRGXSetRegConfigTypeIN_UI8,
-				IMG_UINT8 * psRGXSetRegConfigTypeOUT_UI8,
-				CONNECTION_DATA * psConnection)
+				IMG_UINT8 *psRGXSetRegConfigTypeIN_UI8,
+				IMG_UINT8 *psRGXSetRegConfigTypeOUT_UI8,
+				CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXSETREGCONFIGTYPE *psRGXSetRegConfigTypeIN =
 	    (PVRSRV_BRIDGE_IN_RGXSETREGCONFIGTYPE *) IMG_OFFSET_ADDR(psRGXSetRegConfigTypeIN_UI8,
@@ -84,13 +81,13 @@ PVRSRVBridgeRGXSetRegConfigType(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVRGXSetRegConfigTypeKM(psConnection, OSGetDevNode(psConnection),
 					psRGXSetRegConfigTypeIN->ui8RegPowerIsland);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXSETREGCONFIGTYPE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXAddRegconfig(IMG_UINT32 ui32DispatchTableEntry,
-			    IMG_UINT8 * psRGXAddRegconfigIN_UI8,
-			    IMG_UINT8 * psRGXAddRegconfigOUT_UI8, CONNECTION_DATA * psConnection)
+			    IMG_UINT8 *psRGXAddRegconfigIN_UI8,
+			    IMG_UINT8 *psRGXAddRegconfigOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXADDREGCONFIG *psRGXAddRegconfigIN =
 	    (PVRSRV_BRIDGE_IN_RGXADDREGCONFIG *) IMG_OFFSET_ADDR(psRGXAddRegconfigIN_UI8, 0);
@@ -103,14 +100,13 @@ PVRSRVBridgeRGXAddRegconfig(IMG_UINT32 ui32DispatchTableEntry,
 				    psRGXAddRegconfigIN->ui64RegValue,
 				    psRGXAddRegconfigIN->ui64RegMask);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXADDREGCONFIG, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXClearRegConfig(IMG_UINT32 ui32DispatchTableEntry,
-			      IMG_UINT8 * psRGXClearRegConfigIN_UI8,
-			      IMG_UINT8 * psRGXClearRegConfigOUT_UI8,
-			      CONNECTION_DATA * psConnection)
+			      IMG_UINT8 *psRGXClearRegConfigIN_UI8,
+			      IMG_UINT8 *psRGXClearRegConfigOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXCLEARREGCONFIG *psRGXClearRegConfigIN =
 	    (PVRSRV_BRIDGE_IN_RGXCLEARREGCONFIG *) IMG_OFFSET_ADDR(psRGXClearRegConfigIN_UI8, 0);
@@ -122,14 +118,14 @@ PVRSRVBridgeRGXClearRegConfig(IMG_UINT32 ui32DispatchTableEntry,
 	psRGXClearRegConfigOUT->eError =
 	    PVRSRVRGXClearRegConfigKM(psConnection, OSGetDevNode(psConnection));
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXCLEARREGCONFIG, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXEnableRegConfig(IMG_UINT32 ui32DispatchTableEntry,
-			       IMG_UINT8 * psRGXEnableRegConfigIN_UI8,
-			       IMG_UINT8 * psRGXEnableRegConfigOUT_UI8,
-			       CONNECTION_DATA * psConnection)
+			       IMG_UINT8 *psRGXEnableRegConfigIN_UI8,
+			       IMG_UINT8 *psRGXEnableRegConfigOUT_UI8,
+			       CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXENABLEREGCONFIG *psRGXEnableRegConfigIN =
 	    (PVRSRV_BRIDGE_IN_RGXENABLEREGCONFIG *) IMG_OFFSET_ADDR(psRGXEnableRegConfigIN_UI8, 0);
@@ -142,14 +138,14 @@ PVRSRVBridgeRGXEnableRegConfig(IMG_UINT32 ui32DispatchTableEntry,
 	psRGXEnableRegConfigOUT->eError =
 	    PVRSRVRGXEnableRegConfigKM(psConnection, OSGetDevNode(psConnection));
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXENABLEREGCONFIG, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXDisableRegConfig(IMG_UINT32 ui32DispatchTableEntry,
-				IMG_UINT8 * psRGXDisableRegConfigIN_UI8,
-				IMG_UINT8 * psRGXDisableRegConfigOUT_UI8,
-				CONNECTION_DATA * psConnection)
+				IMG_UINT8 *psRGXDisableRegConfigIN_UI8,
+				IMG_UINT8 *psRGXDisableRegConfigOUT_UI8,
+				CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXDISABLEREGCONFIG *psRGXDisableRegConfigIN =
 	    (PVRSRV_BRIDGE_IN_RGXDISABLEREGCONFIG *) IMG_OFFSET_ADDR(psRGXDisableRegConfigIN_UI8,
@@ -163,7 +159,7 @@ PVRSRVBridgeRGXDisableRegConfig(IMG_UINT32 ui32DispatchTableEntry,
 	psRGXDisableRegConfigOUT->eError =
 	    PVRSRVRGXDisableRegConfigKM(psConnection, OSGetDevNode(psConnection));
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXDISABLEREGCONFIG, eError);
 }
 
 /* ***************************************************************************
@@ -184,23 +180,30 @@ PVRSRV_ERROR InitRGXREGCONFIGBridge(void)
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXREGCONFIG,
 			      PVRSRV_BRIDGE_RGXREGCONFIG_RGXSETREGCONFIGTYPE,
-			      PVRSRVBridgeRGXSetRegConfigType, NULL);
+			      PVRSRVBridgeRGXSetRegConfigType, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_RGXSETREGCONFIGTYPE),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXSETREGCONFIGTYPE));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXREGCONFIG,
 			      PVRSRV_BRIDGE_RGXREGCONFIG_RGXADDREGCONFIG,
-			      PVRSRVBridgeRGXAddRegconfig, NULL);
+			      PVRSRVBridgeRGXAddRegconfig, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_RGXADDREGCONFIG),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXADDREGCONFIG));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXREGCONFIG,
 			      PVRSRV_BRIDGE_RGXREGCONFIG_RGXCLEARREGCONFIG,
-			      PVRSRVBridgeRGXClearRegConfig, NULL);
+			      PVRSRVBridgeRGXClearRegConfig, NULL, 0,
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXCLEARREGCONFIG));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXREGCONFIG,
 			      PVRSRV_BRIDGE_RGXREGCONFIG_RGXENABLEREGCONFIG,
-			      PVRSRVBridgeRGXEnableRegConfig, NULL);
+			      PVRSRVBridgeRGXEnableRegConfig, NULL, 0,
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXENABLEREGCONFIG));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXREGCONFIG,
 			      PVRSRV_BRIDGE_RGXREGCONFIG_RGXDISABLEREGCONFIG,
-			      PVRSRVBridgeRGXDisableRegConfig, NULL);
+			      PVRSRVBridgeRGXDisableRegConfig, NULL, 0,
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXDISABLEREGCONFIG));
 
 	return PVRSRV_OK;
 }

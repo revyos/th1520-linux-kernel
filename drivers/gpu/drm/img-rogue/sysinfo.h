@@ -51,7 +51,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define WAIT_TRY_COUNT                           (10000)
 
 #if defined(__linux__)
-#define SYS_RGX_DEV_NAME    "rgx,xuantie"
+#define SYS_RGX_DEV_NAME    "rgxthead"
 #endif
 
 #define SYS_RGX_OF_COMPATIBLE "img,gpu"

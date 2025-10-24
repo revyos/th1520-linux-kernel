@@ -59,15 +59,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define DEVMEM_HEAPNAME_MAXLENGTH 160
 
 /*
- * Reserved VA space of a heap must always be multiple of DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY,
- * this check is validated in the DDK. Note this is only reserving "Virtual Address" space and
- * physical allocations (and mappings thereon) should only be done as much as required (to avoid
- * wastage).
- * Granularity has been chosen to support the max possible practically used OS page size.
- */
-#define DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY        0x10000 /* 64KB is MAX anticipated OS page size */
-
-/*
  * VA heap size should be at least OS page size. This check is validated in the DDK.
  */
 #define DEVMEM_HEAP_MINIMUM_SIZE                     0x10000 /* 64KB is MAX anticipated OS page size */
@@ -78,7 +69,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define DEVMEM_REFCOUNT_PRINT(fmt, ...)
 #endif
 
-/* If we need a "hMapping" but we don't have a server-side mapping, we poison
+/* If we need a reservation but we don't have a server-side reservation, we poison
  * the entry with this value so that it's easily recognised in the debugger.
  * Note that this is potentially a valid handle, but then so is NULL, which is
  * no better, indeed worse, as it's not obvious in the debugger. The value
@@ -86,7 +77,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * it isn't this) but it's nice to have a value in the source code that we can
  * grep for if things go wrong.
  */
-#define LACK_OF_MAPPING_POISON ((IMG_HANDLE)0x6116dead)
 #define LACK_OF_RESERVATION_POISON ((IMG_HANDLE)0x7117dead)
 
 #define DEVICEMEM_HISTORY_ALLOC_INDEX_NONE 0xFFFFFFFF
@@ -131,7 +121,7 @@ struct DEVMEM_CONTEXT_TAG
 #define DEVMEM_HEAP_MANAGER_USER         (1U << 0)
 /* Heap VAs managed by the OSs kernel, VA from CPU mapping call used */
 #define DEVMEM_HEAP_MANAGER_KERNEL       (1U << 1)
-/* Heap VAs managed by the heap's own RA  */
+/* Heap VAs managed by the heap's own RA */
 #define DEVMEM_HEAP_MANAGER_RA           (1U << 2)
 /* Heap VAs managed jointly by Services and the client of Services.
  * The reserved region of the heap is managed explicitly by the client of Services
@@ -151,6 +141,16 @@ struct DEVMEM_HEAP_TAG
 	 */
 	IMG_DEV_VIRTADDR sBaseAddress;
 	DEVMEM_SIZE_T uiSize;
+
+	/* The process' malloc heap may have a higher minimum address than our base.
+	 * In this case we will allocate RA resources to pad the SVM heap's base address
+	 * until it is possible to map.
+	 *
+	 * These values are used to keep track of the RA allocations made, in order
+	 * to free them before the SVM RA is destroyed.
+	 */
+	IMG_UINT32 ui32SVMBasePaddingCount; /* The number of allocations made for padding. */
+	DEVMEM_SIZE_T uiSVMBasePaddingSize; /* The size of the allocations made for padding. */
 
 	DEVMEM_SIZE_T uiReservedRegionSize; /* uiReservedRegionLength in DEVMEM_HEAP_BLUEPRINT */
 
@@ -204,7 +204,8 @@ struct DEVMEM_HEAP_TAG
 	IMG_HANDLE hDevMemServerHeap;
 
 	/* This heap is fully allocated and premapped into the device address space.
-	 * Used in virtualisation for firmware heaps of Guest and optionally Host drivers. */
+	 * Used in virtualisation for firmware heaps of Guest and optionally Host
+	 * drivers. */
 	IMG_BOOL bPremapped;
 };
 
@@ -212,7 +213,6 @@ typedef IMG_UINT32 DEVMEM_PROPERTIES_T;                  /*!< Typedef for Device
 #define DEVMEM_PROPERTIES_EXPORTABLE         (1UL<<0)    /*!< Is it exportable? */
 #define DEVMEM_PROPERTIES_IMPORTED           (1UL<<1)    /*!< Is it imported from another process? */
 #define DEVMEM_PROPERTIES_SUBALLOCATABLE     (1UL<<2)    /*!< Is it suballocatable? */
-#define DEVMEM_PROPERTIES_UNPINNED           (1UL<<3)    /*!< Is it currently pinned? */
 #define DEVMEM_PROPERTIES_IMPORT_IS_ZEROED   (1UL<<4)    /*!< Is the memory fully zeroed? */
 #define DEVMEM_PROPERTIES_IMPORT_IS_CLEAN    (1UL<<5)    /*!< Is the memory clean, i.e. not been used before? */
 #define DEVMEM_PROPERTIES_SECURE             (1UL<<6)    /*!< Is it a special secure buffer? No CPU maps allowed! */
@@ -220,8 +220,7 @@ typedef IMG_UINT32 DEVMEM_PROPERTIES_T;                  /*!< Typedef for Device
 #define DEVMEM_PROPERTIES_NO_CPU_MAPPING     (1UL<<8)    /* No CPU Mapping is allowed, RW attributes
                                                             are further derived from allocation memory flags */
 #define DEVMEM_PROPERTIES_NO_LAYOUT_CHANGE	 (1UL<<9)    /* No sparse resizing allowed, once a memory
-                                                            layout is chosen, no change allowed later,
-                                                            This includes pinning and unpinning */
+                                                            layout is chosen, no change allowed later */
 
 
 typedef struct DEVMEM_DEVICE_IMPORT_TAG
@@ -230,7 +229,6 @@ typedef struct DEVMEM_DEVICE_IMPORT_TAG
 	IMG_DEV_VIRTADDR sDevVAddr;     /*!< Device virtual address of the import */
 	IMG_UINT32 ui32RefCount;        /*!< Refcount of the device virtual address */
 	IMG_HANDLE hReservation;        /*!< Device memory reservation handle */
-	IMG_HANDLE hMapping;            /*!< Device mapping handle */
 	IMG_BOOL bMapped;               /*!< This is import mapped? */
 	POS_LOCK hLock;                 /*!< Lock to protect the device import */
 } DEVMEM_DEVICE_IMPORT;
@@ -309,7 +307,7 @@ struct DEVMEMX_PHYS_MEMDESC_TAG
 	PVRSRV_MEMALLOCFLAGS_T uiFlags;         /*!< Flags for this import */
 	IMG_HANDLE hPMR;                        /*!< Handle to the PMR */
 	DEVMEM_CPU_IMPORT sCPUImport;           /*!< CPU specifics of the memdesc */
-	DEVMEM_BRIDGE_HANDLE hBridge;           /*!< Bridge connection for the server */
+	SHARED_DEV_CONNECTION hConnection;      /*!< Services connection for the server */
 	void *pvUserData;						/*!< User data */
 };
 
@@ -369,7 +367,7 @@ PVRSRV_ERROR DevmemImportStructAlloc(SHARED_DEV_CONNECTION hDevConnection,
 @Input          uiMapFlags
 @Input          hPMR         Reference to the PMR of this import struct.
 @Input          uiProperties Properties of the import. Is it exportable,
-                              imported, suballocatable, unpinned?
+                              imported, suballocatable?
 ******************************************************************************/
 void DevmemImportStructInit(DEVMEM_IMPORT *psImport,
                              IMG_DEVMEM_SIZE_T uiSize,
@@ -566,30 +564,17 @@ static INLINE PVRSRV_ERROR DevmemCPUMapCheckImportProperties(DEVMEM_MEMDESC *psM
 {
 	DEVMEM_PROPERTIES_T uiProperties = GetImportProperties(psMemDesc->psImport);
 
-	if (uiProperties &
-			(DEVMEM_PROPERTIES_UNPINNED | DEVMEM_PROPERTIES_SECURE))
-	{
 #if defined(SUPPORT_SECURITY_VALIDATION)
-		if (uiProperties & DEVMEM_PROPERTIES_SECURE)
-		{
-			PVR_DPF((PVR_DBG_WARNING,
+	if (uiProperties & DEVMEM_PROPERTIES_SECURE)
+	{
+		PVR_DPF((PVR_DBG_WARNING,
 					"%s: Allocation is a secure buffer. "
 					"It should not be possible to map to CPU, but for security "
 					"validation this will be allowed for testing purposes, "
 					"as long as the buffer is pinned.",
 					__func__));
-		}
-
-		if (uiProperties & DEVMEM_PROPERTIES_UNPINNED)
-#endif
-		{
-			PVR_DPF((PVR_DBG_ERROR,
-					"%s: Allocation is currently unpinned or a secure buffer. "
-					"Not possible to map to CPU!",
-					__func__));
-			return PVRSRV_ERROR_INVALID_MAP_REQUEST;
-		}
 	}
+#endif
 
 	if (uiProperties & DEVMEM_PROPERTIES_NO_CPU_MAPPING)
 	{

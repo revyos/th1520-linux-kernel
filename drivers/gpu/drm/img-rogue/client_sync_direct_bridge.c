@@ -61,10 +61,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "sync_checkpoint.h"
 
 IMG_INTERNAL PVRSRV_ERROR BridgeAllocSyncPrimitiveBlock(IMG_HANDLE hBridge,
-							IMG_HANDLE * phSyncHandle,
-							IMG_UINT32 * pui32SyncPrimVAddr,
-							IMG_UINT32 * pui32SyncPrimBlockSize,
-							IMG_HANDLE * phhSyncPMR)
+							IMG_HANDLE *phSyncHandle,
+							IMG_UINT32 *pui32SyncPrimVAddr,
+							IMG_UINT32 *pui32SyncPrimBlockSize,
+							IMG_HANDLE *phhSyncPMR)
 {
 	PVRSRV_ERROR eError;
 	SYNC_PRIMITIVE_BLOCK *psSyncHandleInt = NULL;
@@ -223,7 +223,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgeSyncAllocEvent(IMG_HANDLE hBridge,
 					       IMG_BOOL bServerSync,
 					       IMG_UINT32 ui32FWAddr,
 					       IMG_UINT32 ui32ClassNameSize,
-					       const IMG_CHAR * puiClassName)
+					       const IMG_CHAR *puiClassName)
 {
 	PVRSRV_ERROR eError;
 

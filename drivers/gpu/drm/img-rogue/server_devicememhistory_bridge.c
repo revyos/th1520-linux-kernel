@@ -45,6 +45,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "img_defs.h"
 
+#include "pmr.h"
 #include "devicemem_history_server.h"
 
 #include "common_devicememhistory_bridge.h"
@@ -53,9 +54,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -70,11 +68,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 static_assert(DEVMEM_ANNOTATION_MAX_LEN <= IMG_UINT32_MAX,
 	      "DEVMEM_ANNOTATION_MAX_LEN must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevicememHistoryMap(IMG_UINT32 ui32DispatchTableEntry,
-				IMG_UINT8 * psDevicememHistoryMapIN_UI8,
-				IMG_UINT8 * psDevicememHistoryMapOUT_UI8,
-				CONNECTION_DATA * psConnection)
+				IMG_UINT8 *psDevicememHistoryMapIN_UI8,
+				IMG_UINT8 *psDevicememHistoryMapOUT_UI8,
+				CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYMAP *psDevicememHistoryMapIN =
 	    (PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYMAP *) IMG_OFFSET_ADDR(psDevicememHistoryMapIN_UI8,
@@ -89,9 +87,7 @@ PVRSRVBridgeDevicememHistoryMap(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize = ((IMG_UINT64) DEVMEM_ANNOTATION_MAX_LEN * sizeof(IMG_CHAR)) + 0;
@@ -106,7 +102,6 @@ PVRSRVBridgeDevicememHistoryMap(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psDevicememHistoryMapIN), sizeof(unsigned long));
@@ -122,7 +117,6 @@ PVRSRVBridgeDevicememHistoryMap(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -199,24 +193,20 @@ DevicememHistoryMap_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYMAP, eError);
 }
 
 static_assert(DEVMEM_ANNOTATION_MAX_LEN <= IMG_UINT32_MAX,
 	      "DEVMEM_ANNOTATION_MAX_LEN must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevicememHistoryUnmap(IMG_UINT32 ui32DispatchTableEntry,
-				  IMG_UINT8 * psDevicememHistoryUnmapIN_UI8,
-				  IMG_UINT8 * psDevicememHistoryUnmapOUT_UI8,
-				  CONNECTION_DATA * psConnection)
+				  IMG_UINT8 *psDevicememHistoryUnmapIN_UI8,
+				  IMG_UINT8 *psDevicememHistoryUnmapOUT_UI8,
+				  CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYUNMAP *psDevicememHistoryUnmapIN =
 	    (PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYUNMAP *)
@@ -231,9 +221,7 @@ PVRSRVBridgeDevicememHistoryUnmap(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize = ((IMG_UINT64) DEVMEM_ANNOTATION_MAX_LEN * sizeof(IMG_CHAR)) + 0;
@@ -248,7 +236,6 @@ PVRSRVBridgeDevicememHistoryUnmap(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psDevicememHistoryUnmapIN), sizeof(unsigned long));
@@ -264,7 +251,6 @@ PVRSRVBridgeDevicememHistoryUnmap(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -341,24 +327,20 @@ DevicememHistoryUnmap_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYUNMAP, eError);
 }
 
 static_assert(DEVMEM_ANNOTATION_MAX_LEN <= IMG_UINT32_MAX,
 	      "DEVMEM_ANNOTATION_MAX_LEN must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevicememHistoryMapVRange(IMG_UINT32 ui32DispatchTableEntry,
-				      IMG_UINT8 * psDevicememHistoryMapVRangeIN_UI8,
-				      IMG_UINT8 * psDevicememHistoryMapVRangeOUT_UI8,
-				      CONNECTION_DATA * psConnection)
+				      IMG_UINT8 *psDevicememHistoryMapVRangeIN_UI8,
+				      IMG_UINT8 *psDevicememHistoryMapVRangeOUT_UI8,
+				      CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYMAPVRANGE *psDevicememHistoryMapVRangeIN =
 	    (PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYMAPVRANGE *)
@@ -371,9 +353,7 @@ PVRSRVBridgeDevicememHistoryMapVRange(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize = ((IMG_UINT64) DEVMEM_ANNOTATION_MAX_LEN * sizeof(IMG_CHAR)) + 0;
@@ -388,7 +368,6 @@ PVRSRVBridgeDevicememHistoryMapVRange(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psDevicememHistoryMapVRangeIN), sizeof(unsigned long));
@@ -404,7 +383,6 @@ PVRSRVBridgeDevicememHistoryMapVRange(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -454,24 +432,20 @@ DevicememHistoryMapVRange_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYMAPVRANGE, eError);
 }
 
 static_assert(DEVMEM_ANNOTATION_MAX_LEN <= IMG_UINT32_MAX,
 	      "DEVMEM_ANNOTATION_MAX_LEN must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevicememHistoryUnmapVRange(IMG_UINT32 ui32DispatchTableEntry,
-					IMG_UINT8 * psDevicememHistoryUnmapVRangeIN_UI8,
-					IMG_UINT8 * psDevicememHistoryUnmapVRangeOUT_UI8,
-					CONNECTION_DATA * psConnection)
+					IMG_UINT8 *psDevicememHistoryUnmapVRangeIN_UI8,
+					IMG_UINT8 *psDevicememHistoryUnmapVRangeOUT_UI8,
+					CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYUNMAPVRANGE *psDevicememHistoryUnmapVRangeIN =
 	    (PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYUNMAPVRANGE *)
@@ -484,9 +458,7 @@ PVRSRVBridgeDevicememHistoryUnmapVRange(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize = ((IMG_UINT64) DEVMEM_ANNOTATION_MAX_LEN * sizeof(IMG_CHAR)) + 0;
@@ -501,7 +473,6 @@ PVRSRVBridgeDevicememHistoryUnmapVRange(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psDevicememHistoryUnmapVRangeIN), sizeof(unsigned long));
@@ -518,7 +489,6 @@ PVRSRVBridgeDevicememHistoryUnmapVRange(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -570,24 +540,24 @@ DevicememHistoryUnmapVRange_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYUNMAPVRANGE, eError);
 }
 
 static_assert(DEVMEM_ANNOTATION_MAX_LEN <= IMG_UINT32_MAX,
 	      "DEVMEM_ANNOTATION_MAX_LEN must not be larger than IMG_UINT32_MAX");
+static_assert(PMR_MAX_SUPPORTED_4K_PAGE_COUNT <= IMG_UINT32_MAX,
+	      "PMR_MAX_SUPPORTED_4K_PAGE_COUNT must not be larger than IMG_UINT32_MAX");
+static_assert(PMR_MAX_SUPPORTED_4K_PAGE_COUNT <= IMG_UINT32_MAX,
+	      "PMR_MAX_SUPPORTED_4K_PAGE_COUNT must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevicememHistorySparseChange(IMG_UINT32 ui32DispatchTableEntry,
-					 IMG_UINT8 * psDevicememHistorySparseChangeIN_UI8,
-					 IMG_UINT8 * psDevicememHistorySparseChangeOUT_UI8,
-					 CONNECTION_DATA * psConnection)
+					 IMG_UINT8 *psDevicememHistorySparseChangeIN_UI8,
+					 IMG_UINT8 *psDevicememHistorySparseChangeOUT_UI8,
+					 CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYSPARSECHANGE *psDevicememHistorySparseChangeIN =
 	    (PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYSPARSECHANGE *)
@@ -604,9 +574,7 @@ PVRSRVBridgeDevicememHistorySparseChange(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize =
@@ -615,6 +583,21 @@ PVRSRVBridgeDevicememHistorySparseChange(IMG_UINT32 ui32DispatchTableEntry,
 	     sizeof(IMG_UINT32)) +
 	    ((IMG_UINT64) psDevicememHistorySparseChangeIN->ui32FreePageCount *
 	     sizeof(IMG_UINT32)) + 0;
+
+	if (unlikely
+	    (psDevicememHistorySparseChangeIN->ui32AllocPageCount >
+	     PMR_MAX_SUPPORTED_4K_PAGE_COUNT))
+	{
+		psDevicememHistorySparseChangeOUT->eError = PVRSRV_ERROR_BRIDGE_ARRAY_SIZE_TOO_BIG;
+		goto DevicememHistorySparseChange_exit;
+	}
+
+	if (unlikely
+	    (psDevicememHistorySparseChangeIN->ui32FreePageCount > PMR_MAX_SUPPORTED_4K_PAGE_COUNT))
+	{
+		psDevicememHistorySparseChangeOUT->eError = PVRSRV_ERROR_BRIDGE_ARRAY_SIZE_TOO_BIG;
+		goto DevicememHistorySparseChange_exit;
+	}
 
 	if (ui64BufferSize > IMG_UINT32_MAX)
 	{
@@ -626,7 +609,6 @@ PVRSRVBridgeDevicememHistorySparseChange(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psDevicememHistorySparseChangeIN), sizeof(unsigned long));
@@ -643,7 +625,6 @@ PVRSRVBridgeDevicememHistorySparseChange(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -771,14 +752,10 @@ DevicememHistorySparseChange_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYSPARSECHANGE, eError);
 }
 
 /* ***************************************************************************
@@ -799,24 +776,33 @@ PVRSRV_ERROR InitDEVICEMEMHISTORYBridge(void)
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DEVICEMEMHISTORY,
 			      PVRSRV_BRIDGE_DEVICEMEMHISTORY_DEVICEMEMHISTORYMAP,
-			      PVRSRVBridgeDevicememHistoryMap, pDEVICEMEMHISTORYBridgeLock);
+			      PVRSRVBridgeDevicememHistoryMap, pDEVICEMEMHISTORYBridgeLock,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYMAP),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYMAP));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DEVICEMEMHISTORY,
 			      PVRSRV_BRIDGE_DEVICEMEMHISTORY_DEVICEMEMHISTORYUNMAP,
-			      PVRSRVBridgeDevicememHistoryUnmap, pDEVICEMEMHISTORYBridgeLock);
+			      PVRSRVBridgeDevicememHistoryUnmap, pDEVICEMEMHISTORYBridgeLock,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYUNMAP),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYUNMAP));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DEVICEMEMHISTORY,
 			      PVRSRV_BRIDGE_DEVICEMEMHISTORY_DEVICEMEMHISTORYMAPVRANGE,
-			      PVRSRVBridgeDevicememHistoryMapVRange, pDEVICEMEMHISTORYBridgeLock);
+			      PVRSRVBridgeDevicememHistoryMapVRange, pDEVICEMEMHISTORYBridgeLock,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYMAPVRANGE),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYMAPVRANGE));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DEVICEMEMHISTORY,
 			      PVRSRV_BRIDGE_DEVICEMEMHISTORY_DEVICEMEMHISTORYUNMAPVRANGE,
-			      PVRSRVBridgeDevicememHistoryUnmapVRange, pDEVICEMEMHISTORYBridgeLock);
+			      PVRSRVBridgeDevicememHistoryUnmapVRange, pDEVICEMEMHISTORYBridgeLock,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYUNMAPVRANGE),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYUNMAPVRANGE));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DEVICEMEMHISTORY,
 			      PVRSRV_BRIDGE_DEVICEMEMHISTORY_DEVICEMEMHISTORYSPARSECHANGE,
-			      PVRSRVBridgeDevicememHistorySparseChange,
-			      pDEVICEMEMHISTORYBridgeLock);
+			      PVRSRVBridgeDevicememHistorySparseChange, pDEVICEMEMHISTORYBridgeLock,
+			      sizeof(PVRSRV_BRIDGE_IN_DEVICEMEMHISTORYSPARSECHANGE),
+			      sizeof(PVRSRV_BRIDGE_OUT_DEVICEMEMHISTORYSPARSECHANGE));
 
 	return PVRSRV_OK;
 }

@@ -54,9 +54,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -66,11 +63,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgeSyncRecordRemoveByHandle(IMG_UINT32 ui32DispatchTableEntry,
-				     IMG_UINT8 * psSyncRecordRemoveByHandleIN_UI8,
-				     IMG_UINT8 * psSyncRecordRemoveByHandleOUT_UI8,
-				     CONNECTION_DATA * psConnection)
+				     IMG_UINT8 *psSyncRecordRemoveByHandleIN_UI8,
+				     IMG_UINT8 *psSyncRecordRemoveByHandleOUT_UI8,
+				     CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_SYNCRECORDREMOVEBYHANDLE *psSyncRecordRemoveByHandleIN =
 	    (PVRSRV_BRIDGE_IN_SYNCRECORDREMOVEBYHANDLE *)
@@ -102,7 +99,7 @@ PVRSRVBridgeSyncRecordRemoveByHandle(IMG_UINT32 ui32DispatchTableEntry,
 
 SyncRecordRemoveByHandle_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_SYNCRECORDREMOVEBYHANDLE, eError);
 }
 
 static PVRSRV_ERROR _SyncRecordAddpshRecordIntRelease(void *pvData)
@@ -115,10 +112,10 @@ static PVRSRV_ERROR _SyncRecordAddpshRecordIntRelease(void *pvData)
 static_assert(PVRSRV_SYNC_NAME_LENGTH <= IMG_UINT32_MAX,
 	      "PVRSRV_SYNC_NAME_LENGTH must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeSyncRecordAdd(IMG_UINT32 ui32DispatchTableEntry,
-			  IMG_UINT8 * psSyncRecordAddIN_UI8,
-			  IMG_UINT8 * psSyncRecordAddOUT_UI8, CONNECTION_DATA * psConnection)
+			  IMG_UINT8 *psSyncRecordAddIN_UI8,
+			  IMG_UINT8 *psSyncRecordAddOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_SYNCRECORDADD *psSyncRecordAddIN =
 	    (PVRSRV_BRIDGE_IN_SYNCRECORDADD *) IMG_OFFSET_ADDR(psSyncRecordAddIN_UI8, 0);
@@ -132,9 +129,7 @@ PVRSRVBridgeSyncRecordAdd(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize =
@@ -156,7 +151,6 @@ PVRSRVBridgeSyncRecordAdd(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psSyncRecordAddIN), sizeof(unsigned long));
@@ -172,7 +166,6 @@ PVRSRVBridgeSyncRecordAdd(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -285,14 +278,10 @@ SyncRecordAdd_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_SYNCRECORDADD, eError);
 }
 
 /* ***************************************************************************
@@ -310,10 +299,14 @@ PVRSRV_ERROR InitSYNCTRACKINGBridge(void)
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_SYNCTRACKING,
 			      PVRSRV_BRIDGE_SYNCTRACKING_SYNCRECORDREMOVEBYHANDLE,
-			      PVRSRVBridgeSyncRecordRemoveByHandle, NULL);
+			      PVRSRVBridgeSyncRecordRemoveByHandle, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_SYNCRECORDREMOVEBYHANDLE),
+			      sizeof(PVRSRV_BRIDGE_OUT_SYNCRECORDREMOVEBYHANDLE));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_SYNCTRACKING, PVRSRV_BRIDGE_SYNCTRACKING_SYNCRECORDADD,
-			      PVRSRVBridgeSyncRecordAdd, NULL);
+			      PVRSRVBridgeSyncRecordAdd, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_SYNCRECORDADD),
+			      sizeof(PVRSRV_BRIDGE_OUT_SYNCRECORDADD));
 
 	return PVRSRV_OK;
 }

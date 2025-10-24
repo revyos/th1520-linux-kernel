@@ -50,6 +50,12 @@
 struct pvr_fence;
 struct pvr_fence_context;
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0))
+#define pvr_assign_str __assign_str
+#else
+#define pvr_assign_str(a, b) __assign_str(a)
+#endif
+
 DECLARE_EVENT_CLASS(pvr_fence_context,
 
 	TP_PROTO(struct pvr_fence_context *fctx),
@@ -61,7 +67,7 @@ DECLARE_EVENT_CLASS(pvr_fence_context,
 	),
 
 	TP_fast_assign(
-		__assign_str(name, fctx->name)
+		pvr_assign_str(name, fctx->name);
 		pvr_context_value_str(fctx, __entry->val,
 			sizeof(__entry->val));
 	),
@@ -106,10 +112,10 @@ DECLARE_EVENT_CLASS(pvr_fence,
 	),
 
 	TP_fast_assign(
-		__assign_str(driver,
-			fence->base.ops->get_driver_name(&fence->base))
-		__assign_str(timeline,
-			fence->base.ops->get_timeline_name(&fence->base))
+		pvr_assign_str(driver,
+			fence->base.ops->get_driver_name(&fence->base));
+		pvr_assign_str(timeline,
+			fence->base.ops->get_timeline_name(&fence->base));
 		fence->base.ops->fence_value_str(&fence->base,
 			__entry->val, sizeof(__entry->val));
 		__entry->context = fence->base.context;
@@ -165,26 +171,26 @@ DECLARE_EVENT_CLASS(pvr_fence_foreign,
 	),
 
 	TP_fast_assign(
-		__assign_str(driver,
-			fence->base.ops->get_driver_name(&fence->base))
-		__assign_str(timeline,
-			fence->base.ops->get_timeline_name(&fence->base))
+		pvr_assign_str(driver,
+			fence->base.ops->get_driver_name(&fence->base));
+		pvr_assign_str(timeline,
+			fence->base.ops->get_timeline_name(&fence->base));
 		fence->base.ops->fence_value_str(&fence->base, __entry->val,
 			sizeof(__entry->val));
 		__entry->context = fence->base.context;
-		__assign_str(foreign_driver,
+		pvr_assign_str(foreign_driver,
 			fence->fence->ops->get_driver_name ?
 			fence->fence->ops->get_driver_name(fence->fence) :
-			"unknown")
-		__assign_str(foreign_timeline,
+			"unknown");
+		pvr_assign_str(foreign_timeline,
 			fence->fence->ops->get_timeline_name ?
 			fence->fence->ops->get_timeline_name(fence->fence) :
-			"unknown")
+			"unknown");
 		fence->fence->ops->fence_value_str ?
 			fence->fence->ops->fence_value_str(
 				fence->fence, __entry->foreign_val,
 				sizeof(__entry->foreign_val)) :
-			(void) strlcpy(__entry->foreign_val,
+			(void) OSStringSafeCopy(__entry->foreign_val,
 				"unknown", sizeof(__entry->foreign_val));
 		__entry->foreign_context = fence->fence->context;
 	),

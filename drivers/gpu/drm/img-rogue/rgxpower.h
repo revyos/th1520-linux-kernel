@@ -59,14 +59,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
  does necessary preparation before power state transition
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
  @Input	   eNewPowerState : New power state
  @Input	   eCurrentPowerState : Current power state
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXPrePowerState(IMG_HANDLE				hDevHandle,
+PVRSRV_ERROR RGXPrePowerState(PPVRSRV_DEVICE_NODE		psDeviceNode,
 							  PVRSRV_DEV_POWER_STATE	eNewPowerState,
 							  PVRSRV_DEV_POWER_STATE	eCurrentPowerState,
 							  PVRSRV_POWER_FLAGS		ePwrFlags);
@@ -80,14 +80,14 @@ PVRSRV_ERROR RGXPrePowerState(IMG_HANDLE				hDevHandle,
 
  does necessary preparation after power state transition
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
  @Input	   eNewPowerState : New power state
  @Input	   eCurrentPowerState : Current power state
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXPostPowerState(IMG_HANDLE				hDevHandle,
+PVRSRV_ERROR RGXPostPowerState(PPVRSRV_DEVICE_NODE		psDeviceNode,
 							   PVRSRV_DEV_POWER_STATE	eNewPowerState,
 							   PVRSRV_DEV_POWER_STATE	eCurrentPowerState,
 							   PVRSRV_POWER_FLAGS		ePwrFlags);
@@ -101,14 +101,14 @@ PVRSRV_ERROR RGXPostPowerState(IMG_HANDLE				hDevHandle,
 
  does necessary preparation before power state transition on a vz driver
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
  @Input	   eNewPowerState : New power state
  @Input	   eCurrentPowerState : Current power state
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXVzPrePowerState(IMG_HANDLE				hDevHandle,
+PVRSRV_ERROR RGXVzPrePowerState(PPVRSRV_DEVICE_NODE		psDeviceNode,
 								PVRSRV_DEV_POWER_STATE	eNewPowerState,
 								PVRSRV_DEV_POWER_STATE	eCurrentPowerState,
 								PVRSRV_POWER_FLAGS		ePwrFlags);
@@ -122,14 +122,14 @@ PVRSRV_ERROR RGXVzPrePowerState(IMG_HANDLE				hDevHandle,
 
  does necessary preparation after power state transition on a vz driver
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
  @Input	   eNewPowerState : New power state
  @Input	   eCurrentPowerState : Current power state
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXVzPostPowerState(IMG_HANDLE				hDevHandle,
+PVRSRV_ERROR RGXVzPostPowerState(PPVRSRV_DEVICE_NODE	psDeviceNode,
 								 PVRSRV_DEV_POWER_STATE	eNewPowerState,
 								 PVRSRV_DEV_POWER_STATE	eCurrentPowerState,
 								 PVRSRV_POWER_FLAGS		ePwrFlags);
@@ -143,13 +143,13 @@ PVRSRV_ERROR RGXVzPostPowerState(IMG_HANDLE				hDevHandle,
 
 	Does processing required before an RGX clock speed change.
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
  @Input	   eCurrentPowerState : Power state of the device
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXPreClockSpeedChange(IMG_HANDLE				hDevHandle,
+PVRSRV_ERROR RGXPreClockSpeedChange(PPVRSRV_DEVICE_NODE		psDeviceNode,
 									PVRSRV_DEV_POWER_STATE	eCurrentPowerState);
 
 /*!
@@ -161,31 +161,66 @@ PVRSRV_ERROR RGXPreClockSpeedChange(IMG_HANDLE				hDevHandle,
 
 	Does processing required after an RGX clock speed change.
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
  @Input	   eCurrentPowerState : Power state of the device
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXPostClockSpeedChange(IMG_HANDLE				hDevHandle,
+PVRSRV_ERROR RGXPostClockSpeedChange(PPVRSRV_DEVICE_NODE	psDeviceNode,
 									 PVRSRV_DEV_POWER_STATE	eCurrentPowerState);
 
 
+#if defined(SUPPORT_FW_CORE_CLK_RATE_CHANGE_NOTIFY)
+#if defined(SUPPORT_PDVFS) && (PDVFS_COM == PDVFS_COM_HOST)
 /*!
 ******************************************************************************
 
- @Function	RGXDustCountChange
+ @Function	RGXProcessCoreClkChangeRequest
 
- @Description Change of number of DUSTs
-
- @Input	   hDevHandle : RGX Device Node
- @Input	   ui32NumberOfDusts : Number of DUSTs to make transition to
+ @Input	   psDevInfo : RGX Device Info
+ @Input	   ui32CoreClockRate : New clock frequency to send to system layer.
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXDustCountChange(IMG_HANDLE hDevHandle,
-								IMG_UINT32 ui32NumberOfDusts);
+PVRSRV_ERROR RGXProcessCoreClkChangeRequest(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32CoreClockRate);
+#define RGX_PROCESS_CORE_CLK_RATE_CHANGE(devinfo, clk)  RGXProcessCoreClkChangeRequest(devinfo, clk)
+
+#else
+/*!
+******************************************************************************
+
+ @Function	RGXProcessCoreClkChangeNotification
+
+ @Input	   psDevInfo : RGX Device Info
+ @Input	   ui32CoreClockRate : New clock frequency.
+
+ @Return   PVRSRV_ERROR :
+
+******************************************************************************/
+PVRSRV_ERROR RGXProcessCoreClkChangeNotification(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32CoreClockRate);
+#define RGX_PROCESS_CORE_CLK_RATE_CHANGE(devinfo, clk)  RGXProcessCoreClkChangeNotification(devinfo, clk)
+#endif
+#endif /* SUPPORT_FW_CORE_CLK_RATE_CHANGE_NOTIFY */
+
+/*!
+******************************************************************************
+
+ @Function	RGXPowUnitsChange
+
+ @Description Change power units state
+
+ @Input	   psDeviceNode : RGX Device Node
+ @Input	   ui32PowUnits : On Rogue: Number of DUSTs to make transition to.
+                          On Volcanic: Mask containing power state of SPUs.
+                          Each bit corresponds to an SPU and value must be non-zero.
+
+ @Return   PVRSRV_ERROR :
+
+******************************************************************************/
+PVRSRV_ERROR RGXPowUnitsChange(PPVRSRV_DEVICE_NODE psDeviceNode,
+                               IMG_UINT32 ui32PowUnits);
 
 /*!
 ******************************************************************************
@@ -200,14 +235,14 @@ PVRSRV_ERROR RGXDustCountChange(IMG_HANDLE hDevHandle,
 	power management activity. If bPersistent is NOT set, APM latency will
 	return back to system default on power up.
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
  @Input	   ui32ActivePMLatencyms : Number of milliseconds to wait
  @Input	   bActivePMLatencyPersistant : Set to ensure new value is not reset
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXAPMLatencyChange(IMG_HANDLE				hDevHandle,
+PVRSRV_ERROR RGXAPMLatencyChange(PPVRSRV_DEVICE_NODE	psDeviceNode,
 				IMG_UINT32				ui32ActivePMLatencyms,
 				IMG_BOOL				bActivePMLatencyPersistant);
 
@@ -218,12 +253,12 @@ PVRSRV_ERROR RGXAPMLatencyChange(IMG_HANDLE				hDevHandle,
 
  @Description Initiate a handshake with the FW to power off the GPU
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXActivePowerRequest(IMG_HANDLE hDevHandle);
+PVRSRV_ERROR RGXActivePowerRequest(PPVRSRV_DEVICE_NODE psDeviceNode);
 
 /*!
 ******************************************************************************
@@ -232,7 +267,7 @@ PVRSRV_ERROR RGXActivePowerRequest(IMG_HANDLE hDevHandle);
 
  @Description Initiate a handshake with the FW to idle the GPU
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
 
  @Input    bDeviceOffPermitted : Set to indicate device state being off is not
                                  erroneous.
@@ -240,7 +275,8 @@ PVRSRV_ERROR RGXActivePowerRequest(IMG_HANDLE hDevHandle);
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXForcedIdleRequest(IMG_HANDLE hDevHandle, IMG_BOOL bDeviceOffPermitted);
+PVRSRV_ERROR RGXForcedIdleRequest(PPVRSRV_DEVICE_NODE psDeviceNode,
+                                  IMG_BOOL bDeviceOffPermitted);
 
 /*!
 ******************************************************************************
@@ -249,38 +285,86 @@ PVRSRV_ERROR RGXForcedIdleRequest(IMG_HANDLE hDevHandle, IMG_BOOL bDeviceOffPerm
 
  @Description Send a request to cancel idle to the firmware.
 
- @Input	   hDevHandle : RGX Device Node
+ @Input	   psDeviceNode : RGX Device Node
 
  @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-PVRSRV_ERROR RGXCancelForcedIdleRequest(IMG_HANDLE hDevHandle);
+PVRSRV_ERROR RGXCancelForcedIdleRequest(PPVRSRV_DEVICE_NODE psDeviceNode);
 
 /*!
 ******************************************************************************
 
- @Function	PVRSRVGetNextDustCount
+ @Function	RGXCancelForcedIdleRequestAsync
 
- @Description
+ @Description Send a request to cancel idle to the firmware.
+              Does not wait for response from FW.
 
-	Calculate a sequence of dust counts to achieve full transition coverage.
-	We increment two counts of dusts and switch up and down between them.
-	It does contain a few redundant transitions. If two dust exist, the
-	output transitions should be as follows.
+ @Input	   psDeviceNode : RGX Device Node
 
-	0->1, 0<-1, 0->2, 0<-2, (0->1)
-	1->1, 1->2, 1<-2, (1->2)
-	2->2, (2->0),
-	0->0. Repeat.
-
-	Redundant transitions in brackets.
-
- @Input		psDustReqState : Counter state used to calculate next dust count
- @Input		ui32DustCount : Number of dusts in the core
-
- @Return	PVRSRV_ERROR
+ @Return   PVRSRV_ERROR :
 
 ******************************************************************************/
-IMG_UINT32 RGXGetNextDustCount(RGX_DUST_STATE *psDustState, IMG_UINT32 ui32DustCount);
+PVRSRV_ERROR RGXCancelForcedIdleRequestAsync(PPVRSRV_DEVICE_NODE psDeviceNode);
 
+
+/*!
+******************************************************************************
+
+ @Function	RGXInitGpuUtilStats
+
+ @Description Initialise structure holding GPU utilisation statistics
+
+ @Input    psDeviceNode   : RGX Device Node
+ @Output   psGpuUtilStats : Utilisation statistics structure to init
+
+******************************************************************************/
+void RGXInitGpuUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+						 RGX_GPU_UTIL_STATS	*psGpuUtilStats);
+
+/*!
+******************************************************************************
+
+ @Function	RGXGetGpuBasicUtilStats
+
+ @Description Obtain basic GPU utilisation data, like GPU active time and
+              total measured time in nanoseconds since the previous function
+              call. Percentage of active/total is also provided, as well as a
+              flag indicating if the data collected is valid.
+              Usage data is collected and exported periodically by the
+              firmware. This function does not sleep and can be safely called
+              from an IRQ context.
+
+ @Input    psDeviceNode   : RGX Device Node
+ @Output   psReturnStats  : Collected GPU usage statistics
+
+ @Return   PVRSRV_ERROR
+
+******************************************************************************/
+PVRSRV_ERROR RGXGetGpuBasicUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+								RGX_GPU_UTIL_STATS *psReturnStats);
+
+/*!
+******************************************************************************
+
+ @Function	RGXGetGpuDetailedUtilStats
+
+ @Description Obtain usage data of every hardware Data Master in the GPU
+              divided by VM/Hyperlane usage. Utilisation data consists of the
+              time a GPU DM spent working on behalf of a VM/Hyperlane measured
+              in GPU Timer ticks, total time in ticks since the previous
+              function call, and the active/total percentage.
+              The larger volume of data is periodically collected by the
+              Firmware but it is exported to memory shared with the driver only
+              when explicit requested via KCCB command. The function sleeps
+              while waiting for the data and can't be called in an IRQ context.
+
+ @Input    psDeviceNode   : RGX Device Node
+ @Output   psReturnStats  : Collected GPU usage statistics
+
+ @Return   PVRSRV_ERROR
+
+******************************************************************************/
+PVRSRV_ERROR RGXGetGpuDetailedUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
+										RGX_GPU_UTIL_STATS *psReturnStats);
 #endif /* RGXPOWER_H */

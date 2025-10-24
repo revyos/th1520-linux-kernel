@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -72,10 +69,13 @@ static PVRSRV_ERROR _DICreateContextpsContextIntRelease(void *pvData)
 	return eError;
 }
 
-static IMG_INT
+static_assert(PVRSRVTL_MAX_STREAM_NAME_SIZE <= IMG_UINT32_MAX,
+	      "PVRSRVTL_MAX_STREAM_NAME_SIZE must not be larger than IMG_UINT32_MAX");
+
+static size_t
 PVRSRVBridgeDICreateContext(IMG_UINT32 ui32DispatchTableEntry,
-			    IMG_UINT8 * psDICreateContextIN_UI8,
-			    IMG_UINT8 * psDICreateContextOUT_UI8, CONNECTION_DATA * psConnection)
+			    IMG_UINT8 *psDICreateContextIN_UI8,
+			    IMG_UINT8 *psDICreateContextOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DICREATECONTEXT *psDICreateContextIN =
 	    (PVRSRV_BRIDGE_IN_DICREATECONTEXT *) IMG_OFFSET_ADDR(psDICreateContextIN_UI8, 0);
@@ -87,13 +87,11 @@ PVRSRVBridgeDICreateContext(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize =
-	    ((IMG_UINT64) PRVSRVTL_MAX_STREAM_NAME_SIZE * sizeof(IMG_CHAR)) + 0;
+	    ((IMG_UINT64) PVRSRVTL_MAX_STREAM_NAME_SIZE * sizeof(IMG_CHAR)) + 0;
 
 	PVR_UNREFERENCED_PARAMETER(psDICreateContextIN);
 
@@ -109,7 +107,6 @@ PVRSRVBridgeDICreateContext(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psDICreateContextIN), sizeof(unsigned long));
@@ -125,7 +122,6 @@ PVRSRVBridgeDICreateContext(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -140,7 +136,7 @@ PVRSRVBridgeDICreateContext(IMG_UINT32 ui32DispatchTableEntry,
 	if (IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset) != NULL)
 	{
 		puiStreamNameInt = (IMG_CHAR *) IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset);
-		ui32NextOffset += PRVSRVTL_MAX_STREAM_NAME_SIZE * sizeof(IMG_CHAR);
+		ui32NextOffset += PVRSRVTL_MAX_STREAM_NAME_SIZE * sizeof(IMG_CHAR);
 	}
 
 	psDICreateContextOUT->eError = DICreateContextKM(puiStreamNameInt, &psContextInt);
@@ -170,12 +166,12 @@ PVRSRVBridgeDICreateContext(IMG_UINT32 ui32DispatchTableEntry,
 	UnlockHandle(psConnection->psHandleBase);
 
 	/* If dest ptr is non-null and we have data to copy */
-	if ((puiStreamNameInt) && ((PRVSRVTL_MAX_STREAM_NAME_SIZE * sizeof(IMG_CHAR)) > 0))
+	if ((puiStreamNameInt) && ((PVRSRVTL_MAX_STREAM_NAME_SIZE * sizeof(IMG_CHAR)) > 0))
 	{
 		if (unlikely
 		    (OSCopyToUser
 		     (NULL, (void __user *)psDICreateContextOUT->puiStreamName, puiStreamNameInt,
-		      (PRVSRVTL_MAX_STREAM_NAME_SIZE * sizeof(IMG_CHAR))) != PVRSRV_OK))
+		      (PVRSRVTL_MAX_STREAM_NAME_SIZE * sizeof(IMG_CHAR))) != PVRSRV_OK))
 		{
 			psDICreateContextOUT->eError = PVRSRV_ERROR_INVALID_PARAMS;
 
@@ -187,10 +183,36 @@ DICreateContext_exit:
 
 	if (psDICreateContextOUT->eError != PVRSRV_OK)
 	{
-		if (psContextInt)
+		if (psDICreateContextOUT->hContext)
+		{
+			PVRSRV_ERROR eError;
+
+			/* Lock over handle creation cleanup. */
+			LockHandle(psConnection->psHandleBase);
+
+			eError = PVRSRVDestroyHandleUnlocked(psConnection->psHandleBase,
+							     (IMG_HANDLE) psDICreateContextOUT->
+							     hContext,
+							     PVRSRV_HANDLE_TYPE_DI_CONTEXT);
+			if (unlikely((eError != PVRSRV_OK) && (eError != PVRSRV_ERROR_RETRY)))
+			{
+				PVR_DPF((PVR_DBG_ERROR,
+					 "%s: %s", __func__, PVRSRVGetErrorString(eError)));
+			}
+			/* Releasing the handle should free/destroy/release the resource.
+			 * This should never fail... */
+			PVR_ASSERT((eError == PVRSRV_OK) || (eError == PVRSRV_ERROR_RETRY));
+
+			/* Release now we have cleaned up creation handles. */
+			UnlockHandle(psConnection->psHandleBase);
+
+		}
+
+		else if (psContextInt)
 		{
 			DIDestroyContextKM(psContextInt);
 		}
+
 	}
 
 	/* Allocated space should be equal to the last updated offset */
@@ -199,20 +221,16 @@ DICreateContext_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DICREATECONTEXT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDIDestroyContext(IMG_UINT32 ui32DispatchTableEntry,
-			     IMG_UINT8 * psDIDestroyContextIN_UI8,
-			     IMG_UINT8 * psDIDestroyContextOUT_UI8, CONNECTION_DATA * psConnection)
+			     IMG_UINT8 *psDIDestroyContextIN_UI8,
+			     IMG_UINT8 *psDIDestroyContextOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DIDESTROYCONTEXT *psDIDestroyContextIN =
 	    (PVRSRV_BRIDGE_IN_DIDESTROYCONTEXT *) IMG_OFFSET_ADDR(psDIDestroyContextIN_UI8, 0);
@@ -241,16 +259,16 @@ PVRSRVBridgeDIDestroyContext(IMG_UINT32 ui32DispatchTableEntry,
 
 DIDestroyContext_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DIDESTROYCONTEXT, eError);
 }
 
 static_assert(DI_IMPL_BRG_PATH_LEN <= IMG_UINT32_MAX,
 	      "DI_IMPL_BRG_PATH_LEN must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDIReadEntry(IMG_UINT32 ui32DispatchTableEntry,
-			IMG_UINT8 * psDIReadEntryIN_UI8,
-			IMG_UINT8 * psDIReadEntryOUT_UI8, CONNECTION_DATA * psConnection)
+			IMG_UINT8 *psDIReadEntryIN_UI8,
+			IMG_UINT8 *psDIReadEntryOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DIREADENTRY *psDIReadEntryIN =
 	    (PVRSRV_BRIDGE_IN_DIREADENTRY *) IMG_OFFSET_ADDR(psDIReadEntryIN_UI8, 0);
@@ -263,9 +281,7 @@ PVRSRVBridgeDIReadEntry(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize = ((IMG_UINT64) DI_IMPL_BRG_PATH_LEN * sizeof(IMG_CHAR)) + 0;
@@ -280,7 +296,6 @@ PVRSRVBridgeDIReadEntry(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psDIReadEntryIN), sizeof(unsigned long));
@@ -296,7 +311,6 @@ PVRSRVBridgeDIReadEntry(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -367,14 +381,10 @@ DIReadEntry_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DIREADENTRY, eError);
 }
 
 static_assert(DI_IMPL_BRG_PATH_LEN <= IMG_UINT32_MAX,
@@ -382,10 +392,10 @@ static_assert(DI_IMPL_BRG_PATH_LEN <= IMG_UINT32_MAX,
 static_assert(DI_IMPL_BRG_PATH_LEN <= IMG_UINT32_MAX,
 	      "DI_IMPL_BRG_PATH_LEN must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDIWriteEntry(IMG_UINT32 ui32DispatchTableEntry,
-			 IMG_UINT8 * psDIWriteEntryIN_UI8,
-			 IMG_UINT8 * psDIWriteEntryOUT_UI8, CONNECTION_DATA * psConnection)
+			 IMG_UINT8 *psDIWriteEntryIN_UI8,
+			 IMG_UINT8 *psDIWriteEntryOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DIWRITEENTRY *psDIWriteEntryIN =
 	    (PVRSRV_BRIDGE_IN_DIWRITEENTRY *) IMG_OFFSET_ADDR(psDIWriteEntryIN_UI8, 0);
@@ -399,9 +409,7 @@ PVRSRVBridgeDIWriteEntry(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32NextOffset = 0;
 	IMG_BYTE *pArrayArgsBuffer = NULL;
-#if !defined(INTEGRITY_OS)
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
-#endif
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize =
@@ -424,7 +432,6 @@ PVRSRVBridgeDIWriteEntry(IMG_UINT32 ui32DispatchTableEntry,
 
 	if (ui32BufferSize != 0)
 	{
-#if !defined(INTEGRITY_OS)
 		/* Try to use remainder of input buffer for copies if possible, word-aligned for safety. */
 		IMG_UINT32 ui32InBufferOffset =
 		    PVR_ALIGN(sizeof(*psDIWriteEntryIN), sizeof(unsigned long));
@@ -440,7 +447,6 @@ PVRSRVBridgeDIWriteEntry(IMG_UINT32 ui32DispatchTableEntry,
 			pArrayArgsBuffer = &pInputBuffer[ui32InBufferOffset];
 		}
 		else
-#endif
 		{
 			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
 
@@ -531,20 +537,16 @@ DIWriteEntry_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-#if defined(INTEGRITY_OS)
-	if (pArrayArgsBuffer)
-#else
 	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-#endif
 		OSFreeMemNoStats(pArrayArgsBuffer);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DIWRITEENTRY, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDIListAllEntries(IMG_UINT32 ui32DispatchTableEntry,
-			     IMG_UINT8 * psDIListAllEntriesIN_UI8,
-			     IMG_UINT8 * psDIListAllEntriesOUT_UI8, CONNECTION_DATA * psConnection)
+			     IMG_UINT8 *psDIListAllEntriesIN_UI8,
+			     IMG_UINT8 *psDIListAllEntriesOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_DILISTALLENTRIES *psDIListAllEntriesIN =
 	    (PVRSRV_BRIDGE_IN_DILISTALLENTRIES *) IMG_OFFSET_ADDR(psDIListAllEntriesIN_UI8, 0);
@@ -586,7 +588,7 @@ DIListAllEntries_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DILISTALLENTRIES, eError);
 }
 
 /* ***************************************************************************
@@ -603,19 +605,27 @@ PVRSRV_ERROR InitDIBridge(void)
 {
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DI, PVRSRV_BRIDGE_DI_DICREATECONTEXT,
-			      PVRSRVBridgeDICreateContext, NULL);
+			      PVRSRVBridgeDICreateContext, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DICREATECONTEXT),
+			      sizeof(PVRSRV_BRIDGE_OUT_DICREATECONTEXT));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DI, PVRSRV_BRIDGE_DI_DIDESTROYCONTEXT,
-			      PVRSRVBridgeDIDestroyContext, NULL);
+			      PVRSRVBridgeDIDestroyContext, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DIDESTROYCONTEXT),
+			      sizeof(PVRSRV_BRIDGE_OUT_DIDESTROYCONTEXT));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DI, PVRSRV_BRIDGE_DI_DIREADENTRY,
-			      PVRSRVBridgeDIReadEntry, NULL);
+			      PVRSRVBridgeDIReadEntry, NULL, sizeof(PVRSRV_BRIDGE_IN_DIREADENTRY),
+			      sizeof(PVRSRV_BRIDGE_OUT_DIREADENTRY));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DI, PVRSRV_BRIDGE_DI_DIWRITEENTRY,
-			      PVRSRVBridgeDIWriteEntry, NULL);
+			      PVRSRVBridgeDIWriteEntry, NULL, sizeof(PVRSRV_BRIDGE_IN_DIWRITEENTRY),
+			      sizeof(PVRSRV_BRIDGE_OUT_DIWRITEENTRY));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DI, PVRSRV_BRIDGE_DI_DILISTALLENTRIES,
-			      PVRSRVBridgeDIListAllEntries, NULL);
+			      PVRSRVBridgeDIListAllEntries, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_DILISTALLENTRIES),
+			      sizeof(PVRSRV_BRIDGE_OUT_DILISTALLENTRIES));
 
 	return PVRSRV_OK;
 }

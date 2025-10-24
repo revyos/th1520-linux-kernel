@@ -50,19 +50,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "vz_vmm_pvz.h"
 #include "vmm_pvz_client.h"
 
-
-static inline void
-PvzClientLockAcquire(void)
+static inline VMM_PVZ_CLIENT_CONNECTION* GetPVZClientConnection(void)
 {
 	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
-	OSLockAcquire(psPVRSRVData->hPvzConnectionLock);
-}
+	VMM_PVZ_CLIENT_CONNECTION *pvPvzCon = psPVRSRVData->psPvzConfig->hPvzClientConnection;
 
-static inline void
-PvzClientLockRelease(void)
-{
-	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
-	OSLockRelease(psPVRSRVData->hPvzConnectionLock);
+	PVR_ASSERT(pvPvzCon != NULL);
+	return pvPvzCon;
 }
 
 /*
@@ -78,37 +72,32 @@ PvzClientMapDevPhysHeap(PVRSRV_DEVICE_CONFIG *psDevConfig)
 {
 	PVRSRV_ERROR eError;
 	IMG_DEV_PHYADDR sDevPAddr;
-	VMM_PVZ_CONNECTION *psVmmPvz;
-	IMG_UINT32 uiFuncID = PVZ_BRIDGE_MAPDEVICEPHYSHEAP;
-	PHYS_HEAP *psFwPhysHeap = psDevConfig->psDevNode->apsPhysHeap[PVRSRV_PHYS_HEAP_FW_MAIN];
+	VMM_PVZ_CLIENT_CONNECTION *psVmmPvz;
+	PHYS_HEAP *psFwPhysHeap = psDevConfig->psDevNode->apsPhysHeap[FIRST_PHYSHEAP_MAPPED_TO_FW_MAIN_DEVMEM];
 
 	eError = PhysHeapGetDevPAddr(psFwPhysHeap, &sDevPAddr);
 
 #if defined(PVR_PMR_TRANSLATE_UMA_ADDRESSES)
-{
-	/* Host expects PA rather than IPA address, so on the platforms where
-	 * IPA-PA translation is not done in hw, performs a software translation */
+	{
+		IMG_DEV_PHYADDR sDevPAddrTranslated;
 
-	IMG_DEV_PHYADDR sDevPAddrTranslated;
-
-	PhysHeapCpuPAddrToDevPAddr(psFwPhysHeap, 1, &sDevPAddrTranslated, (IMG_CPU_PHYADDR *)&sDevPAddr);
-	sDevPAddr.uiAddr = sDevPAddrTranslated.uiAddr;
-}
+		/* If required, perform a software translation between CPU and Device physical addresses. */
+		PhysHeapCpuPAddrToDevPAddr(psFwPhysHeap, 1, &sDevPAddrTranslated, (IMG_CPU_PHYADDR *)&sDevPAddr);
+		sDevPAddr.uiAddr = sDevPAddrTranslated.uiAddr;
+	}
 #endif
 
 	PVR_LOG_RETURN_IF_ERROR(eError, "PhysHeapGetDevPAddr");
 	PVR_LOG_RETURN_IF_FALSE((sDevPAddr.uiAddr != 0), "PhysHeapGetDevPAddr", PVRSRV_ERROR_INVALID_PARAMS);
 
-	psVmmPvz = PvzConnectionAcquire();
+	psVmmPvz = GetPVZClientConnection();
+	PVR_LOG_RETURN_IF_FALSE((psVmmPvz != NULL), "GetPVZClientConnection", PVRSRV_ERROR_INVALID_PVZ_CONFIG);
+
 	PvzClientLockAcquire();
 
-	eError = psVmmPvz->sClientFuncTab.pfnMapDevPhysHeap(uiFuncID,
-													    0,
-													    RGX_FIRMWARE_RAW_HEAP_SIZE,
-													    sDevPAddr.uiAddr);
+	eError = psVmmPvz->sClientFuncTab.pfnMapDevPhysHeap(RGX_FIRMWARE_RAW_HEAP_SIZE, sDevPAddr.uiAddr);
 
 	PvzClientLockRelease();
-	PvzConnectionRelease(psVmmPvz);
 
 	return eError;
 }
@@ -117,18 +106,14 @@ PVRSRV_ERROR
 PvzClientUnmapDevPhysHeap(PVRSRV_DEVICE_CONFIG *psDevConfig)
 {
 	PVRSRV_ERROR eError;
-	IMG_UINT32 uiFuncID = PVZ_BRIDGE_UNMAPDEVICEPHYSHEAP;
-	VMM_PVZ_CONNECTION *psVmmPvz = PvzConnectionAcquire();
-	PVR_ASSERT(psVmmPvz);
+	VMM_PVZ_CLIENT_CONNECTION *psVmmPvz = GetPVZClientConnection();
+	PVR_LOG_RETURN_IF_FALSE((psVmmPvz != NULL), "GetPVZClientConnection", PVRSRV_ERROR_INVALID_PVZ_CONFIG);
 
 	PvzClientLockAcquire();
 
-	PVR_ASSERT(psVmmPvz->sClientFuncTab.pfnUnmapDevPhysHeap);
-
-	eError = psVmmPvz->sClientFuncTab.pfnUnmapDevPhysHeap(uiFuncID, 0);
+	eError = psVmmPvz->sClientFuncTab.pfnUnmapDevPhysHeap();
 
 	PvzClientLockRelease();
-	PvzConnectionRelease(psVmmPvz);
 
 	return eError;
 }

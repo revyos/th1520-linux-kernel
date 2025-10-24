@@ -49,19 +49,33 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "img_types.h"
 #include "pvrsrv_error.h"
 
-/*
- *  Supported log2 page size values for RGX_GENERAL_NON_4K_HEAP_ID
- */
-#define RGX_HEAP_4KB_PAGE_SHIFT					(12U)
-#define RGX_HEAP_16KB_PAGE_SHIFT				(14U)
-#define RGX_HEAP_64KB_PAGE_SHIFT				(16U)
-#define RGX_HEAP_256KB_PAGE_SHIFT				(18U)
-#define RGX_HEAP_1MB_PAGE_SHIFT					(20U)
-#define RGX_HEAP_2MB_PAGE_SHIFT					(21U)
-
 struct _PVRSRV_DEVICE_NODE_;
 struct _CONNECTION_DATA_;
+struct _DEVMEMINT_HEAP_;
 
+/*************************************************************************/ /*!
+@Function       Callback function PFN_HEAP_INIT
+@Description    Device heap initialisation function. Called in server devmem
+                heap create if the callback pointer in RGX_HEAP_INFO is
+                not NULL.
+@Input          psDeviceNode       The device node.
+@Input          psDevmemHeap       Server internal devmem heap.
+@Output         phPrivData         Private data handle. Allocated resources
+                                   can be freed in PFN_HEAP_DEINIT.
+@Return         PVRSRV_ERROR       PVRSRV_OK or error code
+*/ /**************************************************************************/
+typedef PVRSRV_ERROR (*PFN_HEAP_INIT)(struct _PVRSRV_DEVICE_NODE_ *psDeviceNode,
+                                      struct _DEVMEMINT_HEAP_ *psDevmemHeap,
+                                      IMG_HANDLE *phPrivData);
+
+/*************************************************************************/ /*!
+@Function       Callback function PFN_HEAP_DEINIT
+@Description    Device heap deinit function. Called in server devmem
+                heap create if the callback pointer in RGX_HEAP_INFO is
+                not NULL.
+@Input          hPrivData          Private data handle. To free any resources.
+*/ /**************************************************************************/
+typedef void (*PFN_HEAP_DEINIT)(IMG_HANDLE hPrivData);
 
 /*
   A "heap config" is a blueprint to be used for initial setting up of heaps
@@ -122,6 +136,12 @@ typedef struct _DEVMEM_HEAP_BLUEPRINT_
 	aligned to at least this value */
 	IMG_UINT32 uiLog2ImportAlignment;
 
+	/* Callback function for device specific heap init. */
+	PFN_HEAP_INIT pfnInit;
+
+	/* Callback function for device specific heap deinit. */
+	PFN_HEAP_DEINIT pfnDeInit;
+
 } DEVMEM_HEAP_BLUEPRINT;
 
 void HeapCfgBlueprintInit(const IMG_CHAR        *pszName,
@@ -130,6 +150,8 @@ void HeapCfgBlueprintInit(const IMG_CHAR        *pszName,
 	                      IMG_DEVMEM_SIZE_T      uiReservedRegionLength,
 	                      IMG_UINT32             ui32Log2DataPageSize,
 	                      IMG_UINT32             uiLog2ImportAlignment,
+	                      PFN_HEAP_INIT          pfnInit,
+	                      PFN_HEAP_DEINIT        pfnDeInit,
 	                      DEVMEM_HEAP_BLUEPRINT *psHeapBlueprint);
 
 /* Entire named heap config */
@@ -180,5 +202,12 @@ HeapCfgHeapDetails(struct _CONNECTION_DATA_ *psConnection,
     IMG_UINT32 *puiLog2DataPageSizeOut,
     IMG_UINT32 *puiLog2ImportAlignmentOut
 );
+
+PVRSRV_ERROR
+HeapCfgGetCallbacks(const struct _PVRSRV_DEVICE_NODE_ *psDeviceNode,
+                    IMG_UINT32 uiHeapConfigIndex,
+                    IMG_UINT32 uiHeapIndex,
+                    PFN_HEAP_INIT *ppfnInit,
+                    PFN_HEAP_DEINIT *ppfnDeinit);
 
 #endif

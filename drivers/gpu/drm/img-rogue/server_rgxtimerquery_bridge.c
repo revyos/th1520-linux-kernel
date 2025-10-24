@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -65,11 +62,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXBeginTimerQuery(IMG_UINT32 ui32DispatchTableEntry,
-			       IMG_UINT8 * psRGXBeginTimerQueryIN_UI8,
-			       IMG_UINT8 * psRGXBeginTimerQueryOUT_UI8,
-			       CONNECTION_DATA * psConnection)
+			       IMG_UINT8 *psRGXBeginTimerQueryIN_UI8,
+			       IMG_UINT8 *psRGXBeginTimerQueryOUT_UI8,
+			       CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXBEGINTIMERQUERY *psRGXBeginTimerQueryIN =
 	    (PVRSRV_BRIDGE_IN_RGXBEGINTIMERQUERY *) IMG_OFFSET_ADDR(psRGXBeginTimerQueryIN_UI8, 0);
@@ -81,13 +78,13 @@ PVRSRVBridgeRGXBeginTimerQuery(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVRGXBeginTimerQueryKM(psConnection, OSGetDevNode(psConnection),
 				       psRGXBeginTimerQueryIN->ui32QueryId);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXBEGINTIMERQUERY, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXEndTimerQuery(IMG_UINT32 ui32DispatchTableEntry,
-			     IMG_UINT8 * psRGXEndTimerQueryIN_UI8,
-			     IMG_UINT8 * psRGXEndTimerQueryOUT_UI8, CONNECTION_DATA * psConnection)
+			     IMG_UINT8 *psRGXEndTimerQueryIN_UI8,
+			     IMG_UINT8 *psRGXEndTimerQueryOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXENDTIMERQUERY *psRGXEndTimerQueryIN =
 	    (PVRSRV_BRIDGE_IN_RGXENDTIMERQUERY *) IMG_OFFSET_ADDR(psRGXEndTimerQueryIN_UI8, 0);
@@ -99,13 +96,13 @@ PVRSRVBridgeRGXEndTimerQuery(IMG_UINT32 ui32DispatchTableEntry,
 	psRGXEndTimerQueryOUT->eError =
 	    PVRSRVRGXEndTimerQueryKM(psConnection, OSGetDevNode(psConnection));
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXENDTIMERQUERY, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXQueryTimer(IMG_UINT32 ui32DispatchTableEntry,
-			  IMG_UINT8 * psRGXQueryTimerIN_UI8,
-			  IMG_UINT8 * psRGXQueryTimerOUT_UI8, CONNECTION_DATA * psConnection)
+			  IMG_UINT8 *psRGXQueryTimerIN_UI8,
+			  IMG_UINT8 *psRGXQueryTimerOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXQUERYTIMER *psRGXQueryTimerIN =
 	    (PVRSRV_BRIDGE_IN_RGXQUERYTIMER *) IMG_OFFSET_ADDR(psRGXQueryTimerIN_UI8, 0);
@@ -118,7 +115,7 @@ PVRSRVBridgeRGXQueryTimer(IMG_UINT32 ui32DispatchTableEntry,
 				  &psRGXQueryTimerOUT->ui64StartTime,
 				  &psRGXQueryTimerOUT->ui64EndTime);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXQUERYTIMER, eError);
 }
 
 /* ***************************************************************************
@@ -136,15 +133,19 @@ PVRSRV_ERROR InitRGXTIMERQUERYBridge(void)
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXTIMERQUERY,
 			      PVRSRV_BRIDGE_RGXTIMERQUERY_RGXBEGINTIMERQUERY,
-			      PVRSRVBridgeRGXBeginTimerQuery, NULL);
+			      PVRSRVBridgeRGXBeginTimerQuery, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_RGXBEGINTIMERQUERY),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXBEGINTIMERQUERY));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXTIMERQUERY,
 			      PVRSRV_BRIDGE_RGXTIMERQUERY_RGXENDTIMERQUERY,
-			      PVRSRVBridgeRGXEndTimerQuery, NULL);
+			      PVRSRVBridgeRGXEndTimerQuery, NULL, 0,
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXENDTIMERQUERY));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXTIMERQUERY,
 			      PVRSRV_BRIDGE_RGXTIMERQUERY_RGXQUERYTIMER, PVRSRVBridgeRGXQueryTimer,
-			      NULL);
+			      NULL, sizeof(PVRSRV_BRIDGE_IN_RGXQUERYTIMER),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXQUERYTIMER));
 
 	return PVRSRV_OK;
 }

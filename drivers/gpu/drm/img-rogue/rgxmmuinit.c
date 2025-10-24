@@ -43,7 +43,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxmmuinit.h"
 #include "rgxmmudefs_km.h"
 
-#include "device.h"
+#include "rgxdevice.h"
 #include "img_types.h"
 #include "img_defs.h"
 #include "mmu_common.h"
@@ -52,19 +52,32 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "pvrsrv_error.h"
 #include "rgx_memallocflags.h"
-#include "rgx_heaps.h"
+#include "rgx_heaps_server.h"
 #include "pdump_km.h"
-
+#include "allocmem.h"
 
 /* useful macros */
 /* units represented in a bitfield */
 #define UNITS_IN_BITFIELD(Mask, Shift)	((Mask >> Shift) + 1)
 
-
 /*
  * Bits of PT, PD and PC not involving addresses
  */
 
+#if defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+#if !defined(RGX_MMUCTRL_PT_DATA_ENTRY_PENDING_EN)
+#define RGX_MMUCTRL_PT_DATA_ENTRY_PENDING_EN (0U)
+#endif
+
+/* protection bits for MMU_VERSION <= 3 */
+#define RGX_MMUCTRL_PTE_PROTMASK	(RGX_MMUCTRL_PT_DATA_PM_META_PROTECT_EN | \
+		~RGX_MMUCTRL_PT_DATA_AXCACHE_CLRMSK | \
+		RGX_MMUCTRL_PT_DATA_ENTRY_PENDING_EN | \
+		RGX_MMUCTRL_PT_DATA_PM_SRC_EN | \
+		RGX_MMUCTRL_PT_DATA_CC_EN | \
+		RGX_MMUCTRL_PT_DATA_READ_ONLY_EN | \
+		RGX_MMUCTRL_PT_DATA_VALID_EN)
+#else
 #define RGX_MMUCTRL_PTE_PROTMASK	(RGX_MMUCTRL_PT_DATA_PM_META_PROTECT_EN | \
 		RGX_MMUCTRL_PT_DATA_ENTRY_PENDING_EN | \
 		RGX_MMUCTRL_PT_DATA_PM_SRC_EN | \
@@ -72,6 +85,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 		RGX_MMUCTRL_PT_DATA_CC_EN | \
 		RGX_MMUCTRL_PT_DATA_READ_ONLY_EN | \
 		RGX_MMUCTRL_PT_DATA_VALID_EN)
+#endif
 
 #define RGX_MMUCTRL_PDE_PROTMASK	(RGX_MMUCTRL_PD_DATA_ENTRY_PENDING_EN | \
 		~RGX_MMUCTRL_PD_DATA_PAGE_SIZE_CLRMSK | \
@@ -80,6 +94,18 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGX_MMUCTRL_PCE_PROTMASK	(RGX_MMUCTRL_PC_DATA_ENTRY_PENDING_EN | \
 		RGX_MMUCTRL_PC_DATA_VALID_EN)
 
+
+#if defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+/*
+ * protection bits for MMU_VERSION >= 4
+ * MMU4 has no PENDING or PAGE_SIZE fields in PxE
+ */
+#define RGX_MMU4CTRL_PTE_PROTMASK	(RGX_MMUCTRL_PTE_PROTMASK & ~RGX_MMUCTRL_PT_DATA_ENTRY_PENDING_EN)
+
+#define RGX_MMU4CTRL_PDE_PROTMASK	(RGX_MMUCTRL_PD_DATA_VALID_EN)
+
+#define RGX_MMU4CTRL_PCE_PROTMASK	(RGX_MMUCTRL_PC_DATA_VALID_EN)
+#endif
 
 
 static MMU_PxE_CONFIG sRGXMMUPCEConfig;
@@ -167,6 +193,15 @@ static IMG_UINT32 RGXDerivePDEProt4(IMG_UINT32 uiProtFlags);
 static IMG_UINT64 RGXDerivePTEProt8(IMG_UINT32 uiProtFlags, IMG_UINT32 uiLog2DataPageSize);
 static IMG_UINT32 RGXDerivePTEProt4(IMG_UINT32 uiProtFlags);
 
+#if defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+/* protection bits derivation functions for MMUv4 */
+static IMG_UINT64 RGXMMU4DerivePDEProt8(IMG_UINT32 uiProtFlags, IMG_UINT32 uiLog2DataPageSize);
+static PVRSRV_ERROR RGXMMU4GetPageSizeFromPDE8(IMG_UINT64 ui64PDE, IMG_UINT32 *pui32Log2PageSize);
+static PVRSRV_ERROR RGXMMU4GetPageSizeFromVirtAddr(struct _PVRSRV_DEVICE_NODE_ *psDevNode,
+												   IMG_DEV_VIRTADDR sDevVAddr,
+												   IMG_UINT32 *pui32Log2PageSize);
+#endif
+
 static PVRSRV_ERROR RGXGetPageSizeConfigCB(IMG_UINT32 uiLog2DataPageSize,
 		const MMU_PxE_CONFIG **ppsMMUPDEConfig,
 		const MMU_PxE_CONFIG **ppsMMUPTEConfig,
@@ -180,8 +215,51 @@ static PVRSRV_ERROR RGXGetPageSizeFromPDE8(IMG_UINT64 ui64PDE, IMG_UINT32 *pui32
 
 static MMU_DEVICEATTRIBS sRGXMMUDeviceAttributes;
 
+#if defined(PVRSRV_MMU_PARITY_ON_PTALLOC_AND_PTEUNMAP)
+/* This is a basis for a pattern of parity bit values for consecutive VAs.
+   For each PT with 512 entries we'd get either this pattern or its reverse. */
+static const IMG_UINT8 ui8ParityPTPattern[512] = {
+    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1,
+    1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0,
+    1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0,
+    0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0,
+    0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1,
+    0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1,
+    1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1,
+    1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1,
+    0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1,
+    1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0,
+    0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0,
+    1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0,
+    0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0,
+    0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0,
+    1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1,
+    1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1};
+#endif
+
 PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 {
+
+#if defined(RGX_FEATURE_MH_PARITY_BIT_MASK) || defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+#endif
+
+#if defined(RGX_FEATURE_MH_PARITY_BIT_MASK)
+	IMG_BOOL bHaveParity = RGX_IS_FEATURE_SUPPORTED(psDevInfo, MH_PARITY);
+#endif
+
+#if defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+	IMG_BOOL bHaveMMU4 = (RGX_GET_FEATURE_VALUE(psDevInfo, MMU_VERSION) >= 4);
+#define RGX_GET_MMUCTRL_PROTMASK(entry) \
+	(bHaveMMU4 ? RGX_MMU4CTRL_##entry##_PROTMASK : RGX_MMUCTRL_##entry##_PROTMASK)
+#else
+#define RGX_GET_MMUCTRL_PROTMASK(entry) RGX_MMUCTRL_##entry##_PROTMASK
+#endif
+
 	/* Setup of Px Entries:
 	 *
 	 *
@@ -229,13 +307,16 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	/*
 	 * Setup sRGXMMUPCEConfig
 	 */
+	sRGXMMUPCEConfig.ePxLevel = MMU_LEVEL_3;
+	sRGXMMUPCEConfig.pszPxLevelStr = "PC";
 	sRGXMMUPCEConfig.uiBytesPerEntry = 4;     /* 32 bit entries */
-	sRGXMMUPCEConfig.uiAddrMask = 0xfffffff0; /* Mask to get significant address bits of PC entry i.e. the address of the PD */
 
+	sRGXMMUPCEConfig.uiAddrMask = 0xfffffff0; /* Mask to get significant address bits of PC entry i.e. the address of the PD */
 	sRGXMMUPCEConfig.uiAddrShift = 4;         /* Shift this many bits to get PD address */
 	sRGXMMUPCEConfig.uiAddrLog2Align = 12;    /* Alignment of PD physical addresses. */
 
-	sRGXMMUPCEConfig.uiProtMask = RGX_MMUCTRL_PCE_PROTMASK; /* Mask to get the status bits (pending | valid)*/
+	sRGXMMUPCEConfig.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PCE); /* Mask to get the status bits */
+
 	sRGXMMUPCEConfig.uiProtShift = 0;                       /* Shift this many bits to get the status bits */
 
 	sRGXMMUPCEConfig.uiValidEnMask = RGX_MMUCTRL_PC_DATA_VALID_EN;     /* Mask to get entry valid bit of the PC */
@@ -258,11 +339,16 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	 *
 	 *  Configuration for heaps with 4kB Data-Page size
 	 *
+	 * Bit  39      30   29   21   20   12   11        0
+	 *      |         \ /       \ /       \ /           \
+	 *      |....PCE...|...PDE...|...PTE...|....VAddr...|
 	 */
 
 	/*
 	 * Setup sRGXMMUPDEConfig_4KBDP
 	 */
+	sRGXMMUPDEConfig_4KBDP.ePxLevel = MMU_LEVEL_2;
+	sRGXMMUPDEConfig_4KBDP.pszPxLevelStr = "PD";
 	sRGXMMUPDEConfig_4KBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPDEConfig_4KBDP.uiAddrMask = IMG_UINT64_C(0xfffffffff0);
@@ -272,7 +358,7 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	sRGXMMUPDEConfig_4KBDP.uiVarCtrlMask = IMG_UINT64_C(0x000000000e);
 	sRGXMMUPDEConfig_4KBDP.uiVarCtrlShift = 1;
 
-	sRGXMMUPDEConfig_4KBDP.uiProtMask = RGX_MMUCTRL_PDE_PROTMASK;
+	sRGXMMUPDEConfig_4KBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PDE);
 	sRGXMMUPDEConfig_4KBDP.uiProtShift = 0;
 
 	sRGXMMUPDEConfig_4KBDP.uiValidEnMask = RGX_MMUCTRL_PD_DATA_VALID_EN;
@@ -281,17 +367,27 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	/*
 	 * Setup sRGXMMUPTEConfig_4KBDP
 	 */
+	sRGXMMUPTEConfig_4KBDP.ePxLevel = MMU_LEVEL_1;
+	sRGXMMUPTEConfig_4KBDP.pszPxLevelStr = "PT";
 	sRGXMMUPTEConfig_4KBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPTEConfig_4KBDP.uiAddrMask = IMG_UINT64_C(0xfffffff000);
 	sRGXMMUPTEConfig_4KBDP.uiAddrShift = 12;
 	sRGXMMUPTEConfig_4KBDP.uiAddrLog2Align = 12; /* Alignment of the physical addresses of the pages NOT PTs */
 
-	sRGXMMUPTEConfig_4KBDP.uiProtMask = RGX_MMUCTRL_PTE_PROTMASK;
+	sRGXMMUPTEConfig_4KBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PTE);
 	sRGXMMUPTEConfig_4KBDP.uiProtShift = 0;
 
 	sRGXMMUPTEConfig_4KBDP.uiValidEnMask = RGX_MMUCTRL_PT_DATA_VALID_EN;
 	sRGXMMUPTEConfig_4KBDP.uiValidEnShift = RGX_MMUCTRL_PT_DATA_VALID_SHIFT;
+
+#if defined(RGX_FEATURE_MH_PARITY_BIT_MASK)
+	if (bHaveParity)
+	{
+		sRGXMMUPTEConfig_4KBDP.uiParityBitMask = RGX_MMUCTRL_PT_DATA_PT_PARITY_EN;
+		sRGXMMUPTEConfig_4KBDP.uiParityBitShift = RGX_MMUCTRL_PT_DATA_PT_PARITY_SHIFT;
+	}
+#endif
 
 	/*
 	 * Setup sRGXMMUDevVAddrConfig_4KBDP
@@ -329,11 +425,17 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	 *
 	 *  Configuration for heaps with 16kB Data-Page size
 	 *
+	 * Bit  39      30   29   21   20 14   13          0
+	 *      |         \ /       \ /     \ /             \
+	 *      |....PCE...|...PDE...|..PTE..|.....VAddr....|
+	 *
 	 */
 
 	/*
 	 * Setup sRGXMMUPDEConfig_16KBDP
 	 */
+	sRGXMMUPDEConfig_16KBDP.ePxLevel = MMU_LEVEL_2;
+	sRGXMMUPDEConfig_16KBDP.pszPxLevelStr = "PD";
 	sRGXMMUPDEConfig_16KBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPDEConfig_16KBDP.uiAddrMask = IMG_UINT64_C(0xfffffffff0);
@@ -343,7 +445,7 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	sRGXMMUPDEConfig_16KBDP.uiVarCtrlMask = IMG_UINT64_C(0x000000000e);
 	sRGXMMUPDEConfig_16KBDP.uiVarCtrlShift = 1;
 
-	sRGXMMUPDEConfig_16KBDP.uiProtMask = RGX_MMUCTRL_PDE_PROTMASK;
+	sRGXMMUPDEConfig_16KBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PDE);
 	sRGXMMUPDEConfig_16KBDP.uiProtShift = 0;
 
 	sRGXMMUPDEConfig_16KBDP.uiValidEnMask = RGX_MMUCTRL_PD_DATA_VALID_EN;
@@ -352,17 +454,27 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	/*
 	 * Setup sRGXMMUPTEConfig_16KBDP
 	 */
+	sRGXMMUPTEConfig_16KBDP.ePxLevel = MMU_LEVEL_1;
+	sRGXMMUPTEConfig_16KBDP.pszPxLevelStr = "PT";
 	sRGXMMUPTEConfig_16KBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPTEConfig_16KBDP.uiAddrMask = IMG_UINT64_C(0xffffffc000);
 	sRGXMMUPTEConfig_16KBDP.uiAddrShift = 14;
 	sRGXMMUPTEConfig_16KBDP.uiAddrLog2Align = 14;
 
-	sRGXMMUPTEConfig_16KBDP.uiProtMask = RGX_MMUCTRL_PTE_PROTMASK;
+	sRGXMMUPTEConfig_16KBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PTE);
 	sRGXMMUPTEConfig_16KBDP.uiProtShift = 0;
 
 	sRGXMMUPTEConfig_16KBDP.uiValidEnMask = RGX_MMUCTRL_PT_DATA_VALID_EN;
 	sRGXMMUPTEConfig_16KBDP.uiValidEnShift = RGX_MMUCTRL_PT_DATA_VALID_SHIFT;
+
+#if defined(RGX_FEATURE_MH_PARITY_BIT_MASK)
+	if (bHaveParity)
+	{
+		sRGXMMUPTEConfig_16KBDP.uiParityBitMask = RGX_MMUCTRL_PT_DATA_PT_PARITY_EN;
+		sRGXMMUPTEConfig_16KBDP.uiParityBitShift = RGX_MMUCTRL_PT_DATA_PT_PARITY_SHIFT;
+	}
+#endif
 
 	/*
 	 * Setup sRGXMMUDevVAddrConfig_16KBDP
@@ -402,11 +514,17 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	 *
 	 *  Configuration for heaps with 64kB Data-Page size
 	 *
+	 * Bit  39      30   29   21  20 16 15             0
+	 *      |         \ /       \ /   \ /               \
+	 *      |....PCE...|...PDE...|.PTE.|.....VAddr......|
+	 *
 	 */
 
 	/*
 	 * Setup sRGXMMUPDEConfig_64KBDP
 	 */
+	sRGXMMUPDEConfig_64KBDP.ePxLevel = MMU_LEVEL_2;
+	sRGXMMUPDEConfig_64KBDP.pszPxLevelStr = "PD";
 	sRGXMMUPDEConfig_64KBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPDEConfig_64KBDP.uiAddrMask = IMG_UINT64_C(0xfffffffff0);
@@ -416,7 +534,7 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	sRGXMMUPDEConfig_64KBDP.uiVarCtrlMask = IMG_UINT64_C(0x000000000e);
 	sRGXMMUPDEConfig_64KBDP.uiVarCtrlShift = 1;
 
-	sRGXMMUPDEConfig_64KBDP.uiProtMask = RGX_MMUCTRL_PDE_PROTMASK;
+	sRGXMMUPDEConfig_64KBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PDE);
 	sRGXMMUPDEConfig_64KBDP.uiProtShift = 0;
 
 	sRGXMMUPDEConfig_64KBDP.uiValidEnMask = RGX_MMUCTRL_PD_DATA_VALID_EN;
@@ -425,17 +543,27 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	/*
 	 * Setup sRGXMMUPTEConfig_64KBDP
 	 */
+	sRGXMMUPTEConfig_64KBDP.ePxLevel = MMU_LEVEL_1;
+	sRGXMMUPTEConfig_64KBDP.pszPxLevelStr = "PT";
 	sRGXMMUPTEConfig_64KBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPTEConfig_64KBDP.uiAddrMask = IMG_UINT64_C(0xffffff0000);
 	sRGXMMUPTEConfig_64KBDP.uiAddrShift = 16;
 	sRGXMMUPTEConfig_64KBDP.uiAddrLog2Align = 16;
 
-	sRGXMMUPTEConfig_64KBDP.uiProtMask = RGX_MMUCTRL_PTE_PROTMASK;
+	sRGXMMUPTEConfig_64KBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PTE);
 	sRGXMMUPTEConfig_64KBDP.uiProtShift = 0;
 
 	sRGXMMUPTEConfig_64KBDP.uiValidEnMask = RGX_MMUCTRL_PT_DATA_VALID_EN;
 	sRGXMMUPTEConfig_64KBDP.uiValidEnShift = RGX_MMUCTRL_PT_DATA_VALID_SHIFT;
+
+#if defined(RGX_FEATURE_MH_PARITY_BIT_MASK)
+	if (bHaveParity)
+	{
+		sRGXMMUPTEConfig_64KBDP.uiParityBitMask = RGX_MMUCTRL_PT_DATA_PT_PARITY_EN;
+		sRGXMMUPTEConfig_64KBDP.uiParityBitShift = RGX_MMUCTRL_PT_DATA_PT_PARITY_SHIFT;
+	}
+#endif
 
 	/*
 	 * Setup sRGXMMUDevVAddrConfig_64KBDP
@@ -476,11 +604,17 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	 *
 	 *  Configuration for heaps with 256kB Data-Page size
 	 *
+	 * Bit  39      30   29   21 20 18 17              0
+	 *      |         \ /       \|   |/                 \
+	 *      |....PCE...|...PDE...|PTE|.......VAddr......|
+	 *
 	 */
 
 	/*
 	 * Setup sRGXMMUPDEConfig_256KBDP
 	 */
+	sRGXMMUPDEConfig_256KBDP.ePxLevel = MMU_LEVEL_2;
+	sRGXMMUPDEConfig_256KBDP.pszPxLevelStr = "PD";
 	sRGXMMUPDEConfig_256KBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPDEConfig_256KBDP.uiAddrMask = IMG_UINT64_C(0xfffffffff0);
@@ -490,7 +624,7 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	sRGXMMUPDEConfig_256KBDP.uiVarCtrlMask = IMG_UINT64_C(0x000000000e);
 	sRGXMMUPDEConfig_256KBDP.uiVarCtrlShift = 1;
 
-	sRGXMMUPDEConfig_256KBDP.uiProtMask = RGX_MMUCTRL_PDE_PROTMASK;
+	sRGXMMUPDEConfig_256KBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PDE);
 	sRGXMMUPDEConfig_256KBDP.uiProtShift = 0;
 
 	sRGXMMUPDEConfig_256KBDP.uiValidEnMask = RGX_MMUCTRL_PD_DATA_VALID_EN;
@@ -499,17 +633,27 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	/*
 	 * Setup MMU_PxE_CONFIG sRGXMMUPTEConfig_256KBDP
 	 */
+	sRGXMMUPTEConfig_256KBDP.ePxLevel = MMU_LEVEL_1;
+	sRGXMMUPTEConfig_256KBDP.pszPxLevelStr = "PT";
 	sRGXMMUPTEConfig_256KBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPTEConfig_256KBDP.uiAddrMask = IMG_UINT64_C(0xfffffc0000);
 	sRGXMMUPTEConfig_256KBDP.uiAddrShift = 18;
 	sRGXMMUPTEConfig_256KBDP.uiAddrLog2Align = 18;
 
-	sRGXMMUPTEConfig_256KBDP.uiProtMask = RGX_MMUCTRL_PTE_PROTMASK;
+	sRGXMMUPTEConfig_256KBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PTE);
 	sRGXMMUPTEConfig_256KBDP.uiProtShift = 0;
 
 	sRGXMMUPTEConfig_256KBDP.uiValidEnMask = RGX_MMUCTRL_PT_DATA_VALID_EN;
 	sRGXMMUPTEConfig_256KBDP.uiValidEnShift = RGX_MMUCTRL_PT_DATA_VALID_SHIFT;
+
+#if defined(RGX_FEATURE_MH_PARITY_BIT_MASK)
+	if (bHaveParity)
+	{
+		sRGXMMUPTEConfig_256KBDP.uiParityBitMask = RGX_MMUCTRL_PT_DATA_PT_PARITY_EN;
+		sRGXMMUPTEConfig_256KBDP.uiParityBitShift = RGX_MMUCTRL_PT_DATA_PT_PARITY_SHIFT;
+	}
+#endif
 
 	/*
 	 * Setup sRGXMMUDevVAddrConfig_256KBDP
@@ -546,8 +690,20 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	gsPageSizeConfig256KB.uiMaxRefCount = 0;
 
 	/*
+	 *
+	 *  Configuration for heaps with 1MB Data-Page size
+	 *
+	 * Bit  39      30   29   21 20  19               0
+	 *      |         \ /       \ | /                  \
+	 *      |....PCE...|...PDE...|.|........VAddr.......|
+	 *                           PTE
+	 */
+
+	/*
 	 * Setup sRGXMMUPDEConfig_1MBDP
 	 */
+	sRGXMMUPDEConfig_1MBDP.ePxLevel = MMU_LEVEL_2;
+	sRGXMMUPDEConfig_1MBDP.pszPxLevelStr = "PD";
 	sRGXMMUPDEConfig_1MBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPDEConfig_1MBDP.uiAddrMask = IMG_UINT64_C(0xfffffffff0);
@@ -561,7 +717,7 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	sRGXMMUPDEConfig_1MBDP.uiVarCtrlMask = IMG_UINT64_C(0x000000000e);
 	sRGXMMUPDEConfig_1MBDP.uiVarCtrlShift = 1;
 
-	sRGXMMUPDEConfig_1MBDP.uiProtMask = RGX_MMUCTRL_PDE_PROTMASK;
+	sRGXMMUPDEConfig_1MBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PDE);
 	sRGXMMUPDEConfig_1MBDP.uiProtShift = 0;
 
 	sRGXMMUPDEConfig_1MBDP.uiValidEnMask = RGX_MMUCTRL_PD_DATA_VALID_EN;
@@ -570,17 +726,27 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	/*
 	 * Setup sRGXMMUPTEConfig_1MBDP
 	 */
+	sRGXMMUPTEConfig_1MBDP.ePxLevel = MMU_LEVEL_1;
+	sRGXMMUPTEConfig_1MBDP.pszPxLevelStr = "PT";
 	sRGXMMUPTEConfig_1MBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPTEConfig_1MBDP.uiAddrMask = IMG_UINT64_C(0xfffff00000);
 	sRGXMMUPTEConfig_1MBDP.uiAddrShift = 20;
 	sRGXMMUPTEConfig_1MBDP.uiAddrLog2Align = 20;
 
-	sRGXMMUPTEConfig_1MBDP.uiProtMask = RGX_MMUCTRL_PTE_PROTMASK;
+	sRGXMMUPTEConfig_1MBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PTE);
 	sRGXMMUPTEConfig_1MBDP.uiProtShift = 0;
 
 	sRGXMMUPTEConfig_1MBDP.uiValidEnMask = RGX_MMUCTRL_PT_DATA_VALID_EN;
 	sRGXMMUPTEConfig_1MBDP.uiValidEnShift = RGX_MMUCTRL_PT_DATA_VALID_SHIFT;
+
+#if defined(RGX_FEATURE_MH_PARITY_BIT_MASK)
+	if (bHaveParity)
+	{
+		sRGXMMUPTEConfig_1MBDP.uiParityBitMask = RGX_MMUCTRL_PT_DATA_PT_PARITY_EN;
+		sRGXMMUPTEConfig_1MBDP.uiParityBitShift = RGX_MMUCTRL_PT_DATA_PT_PARITY_SHIFT;
+	}
+#endif
 
 	/*
 	 * Setup sRGXMMUDevVAddrConfig_1MBDP
@@ -617,8 +783,20 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	gsPageSizeConfig1MB.uiMaxRefCount = 0;
 
 	/*
+	 *
+	 *  Configuration for heaps with 2MB Data-Page size
+	 *
+	 * Bit  39      30   29   21   20                0
+	 *      |         \ /       \ /                   \
+	 *      |....PCE...|...PDE...|.........VAddr.......|
+	 *
+	 */
+
+	/*
 	 * Setup sRGXMMUPDEConfig_2MBDP
 	 */
+	sRGXMMUPDEConfig_2MBDP.ePxLevel = MMU_LEVEL_2;
+	sRGXMMUPDEConfig_2MBDP.pszPxLevelStr = "PD";
 	sRGXMMUPDEConfig_2MBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPDEConfig_2MBDP.uiAddrMask = IMG_UINT64_C(0xfffffffff0);
@@ -632,22 +810,32 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	sRGXMMUPDEConfig_2MBDP.uiVarCtrlMask = IMG_UINT64_C(0x000000000e);
 	sRGXMMUPDEConfig_2MBDP.uiVarCtrlShift = 1;
 
-	sRGXMMUPDEConfig_2MBDP.uiProtMask = RGX_MMUCTRL_PDE_PROTMASK;
+	sRGXMMUPDEConfig_2MBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PDE);
 	sRGXMMUPDEConfig_2MBDP.uiProtShift = 0;
 
 	sRGXMMUPDEConfig_2MBDP.uiValidEnMask = RGX_MMUCTRL_PD_DATA_VALID_EN;
 	sRGXMMUPDEConfig_2MBDP.uiValidEnShift = RGX_MMUCTRL_PD_DATA_VALID_SHIFT;
 
+#if defined(RGX_FEATURE_MH_PARITY_BIT_MASK)
+	if (bHaveParity)
+	{
+		sRGXMMUPTEConfig_2MBDP.uiParityBitMask = RGX_MMUCTRL_PT_DATA_PT_PARITY_EN;
+		sRGXMMUPTEConfig_2MBDP.uiParityBitShift = RGX_MMUCTRL_PT_DATA_PT_PARITY_SHIFT;
+	}
+#endif
+
 	/*
 	 * Setup sRGXMMUPTEConfig_2MBDP
 	 */
+	sRGXMMUPTEConfig_2MBDP.ePxLevel = MMU_LEVEL_1;
+	sRGXMMUPTEConfig_2MBDP.pszPxLevelStr = "PT";
 	sRGXMMUPTEConfig_2MBDP.uiBytesPerEntry = 8;
 
 	sRGXMMUPTEConfig_2MBDP.uiAddrMask = IMG_UINT64_C(0xffffe00000);
 	sRGXMMUPTEConfig_2MBDP.uiAddrShift = 21;
 	sRGXMMUPTEConfig_2MBDP.uiAddrLog2Align = 21;
 
-	sRGXMMUPTEConfig_2MBDP.uiProtMask = RGX_MMUCTRL_PTE_PROTMASK;
+	sRGXMMUPTEConfig_2MBDP.uiProtMask = RGX_GET_MMUCTRL_PROTMASK(PTE);
 	sRGXMMUPTEConfig_2MBDP.uiProtShift = 0;
 
 	sRGXMMUPTEConfig_2MBDP.uiValidEnMask = RGX_MMUCTRL_PT_DATA_VALID_EN;
@@ -691,10 +879,43 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	 * Setup sRGXMMUDeviceAttributes
 	 */
 	sRGXMMUDeviceAttributes.eMMUType = PDUMP_MMU_TYPE_VARPAGE_40BIT;
-	sRGXMMUDeviceAttributes.eTopLevel = MMU_LEVEL_3;
 	sRGXMMUDeviceAttributes.ui32BaseAlign = RGX_MMUCTRL_PC_DATA_PD_BASE_ALIGNSHIFT;
 	sRGXMMUDeviceAttributes.psBaseConfig = &sRGXMMUPCEConfig;
 	sRGXMMUDeviceAttributes.psTopLevelDevVAddrConfig = &sRGXMMUTopLevelDevVAddrConfig;
+
+#if defined(PVRSRV_MMU_PARITY_ON_PTALLOC_AND_PTEUNMAP)
+	{
+		IMG_UINT32 i;
+
+		PVR_ASSERT(sRGXMMUDevVAddrConfig_4KBDP.uiNumEntriesPT   <= 512);
+		PVR_ASSERT(sRGXMMUDevVAddrConfig_16KBDP.uiNumEntriesPT  <= 512);
+		PVR_ASSERT(sRGXMMUDevVAddrConfig_64KBDP.uiNumEntriesPT  <= 512);
+		PVR_ASSERT(sRGXMMUDevVAddrConfig_256KBDP.uiNumEntriesPT <= 512);
+		PVR_ASSERT(sRGXMMUDevVAddrConfig_1MBDP.uiNumEntriesPT   <= 512);
+		PVR_ASSERT(sRGXMMUDevVAddrConfig_2MBDP.uiNumEntriesPT   <= 512);
+
+		PVR_ASSERT(sRGXMMUPTEConfig_4KBDP.uiBytesPerEntry   == 8);
+		PVR_ASSERT(sRGXMMUPTEConfig_16KBDP.uiBytesPerEntry  == 8);
+		PVR_ASSERT(sRGXMMUPTEConfig_64KBDP.uiBytesPerEntry  == 8);
+		PVR_ASSERT(sRGXMMUPTEConfig_256KBDP.uiBytesPerEntry == 8);
+		PVR_ASSERT(sRGXMMUPTEConfig_1MBDP.uiBytesPerEntry   == 8);
+		PVR_ASSERT(sRGXMMUPTEConfig_2MBDP.uiBytesPerEntry   == 8);
+
+		sRGXMMUDeviceAttributes.pui64PrecomputedAllocParity[0] =
+		    OSAllocZMem(sRGXMMUDevVAddrConfig_4KBDP.uiNumEntriesPT * sRGXMMUPTEConfig_4KBDP.uiBytesPerEntry);
+		sRGXMMUDeviceAttributes.pui64PrecomputedAllocParity[1] =
+		    OSAllocZMem(sRGXMMUDevVAddrConfig_4KBDP.uiNumEntriesPT * sRGXMMUPTEConfig_4KBDP.uiBytesPerEntry);
+
+		/* Generate two precomputed pages in host memory for zero-initialised PTs with parity bits set. */
+		for (i=0; i<sRGXMMUDevVAddrConfig_4KBDP.uiNumEntriesPT; i++)
+		{
+			sRGXMMUDeviceAttributes.pui64PrecomputedAllocParity[0][i] =
+			    ((IMG_UINT64)(ui8ParityPTPattern[i]))         << RGX_MMUCTRL_PT_DATA_PT_PARITY_SHIFT;
+			sRGXMMUDeviceAttributes.pui64PrecomputedAllocParity[1][i] =
+			    ((IMG_UINT64)(ui8ParityPTPattern[i] ? 0 : 1)) << RGX_MMUCTRL_PT_DATA_PT_PARITY_SHIFT;
+		}
+	}
+#endif
 
 	/* Functions for deriving page table/dir/cat protection bits */
 	sRGXMMUDeviceAttributes.pfnDerivePCEProt8 = RGXDerivePCEProt8;
@@ -712,6 +933,18 @@ PVRSRV_ERROR RGXMMUInit_Register(PVRSRV_DEVICE_NODE *psDeviceNode)
 	sRGXMMUDeviceAttributes.pfnGetPageSizeFromPDE4 = RGXGetPageSizeFromPDE4;
 	sRGXMMUDeviceAttributes.pfnGetPageSizeFromPDE8 = RGXGetPageSizeFromPDE8;
 	sRGXMMUDeviceAttributes.pfnGetPageSizeFromVirtAddr = NULL;
+
+#if defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+	if (bHaveMMU4)
+	{
+		/* override some of these functions for MMU4 as page size is not stored in PD entries */
+		sRGXMMUDeviceAttributes.pfnDerivePDEProt8 = RGXMMU4DerivePDEProt8;
+		sRGXMMUDeviceAttributes.pfnGetPageSizeFromPDE8 = RGXMMU4GetPageSizeFromPDE8;
+		sRGXMMUDeviceAttributes.pfnGetPageSizeFromVirtAddr = RGXMMU4GetPageSizeFromVirtAddr;
+	}
+#endif
+
+	sRGXMMUDeviceAttributes.ui32ValidPageSizeMask = RGXGetValidHeapPageSizeMask();
 
 	psDeviceNode->psMMUDevAttrs = &sRGXMMUDeviceAttributes;
 
@@ -848,8 +1081,8 @@ static IMG_UINT64 RGXDerivePDEProt8(IMG_UINT32 uiProtFlags, IMG_UINT32 uiLog2Dat
 			break;
 		default:
 			PVR_DPF((PVR_DBG_ERROR,
-					"%s:%d: in function<%s>: Invalid parameter log2_page_size. Expected {12, 14, 16, 18, 20, 21}. Got [%u]",
-					__FILE__, __LINE__, __func__, uiLog2DataPageSize));
+					"%s: Invalid parameter log2_page_size. Expected {12, 14, 16, 18, 20, 21}. Got [%u]",
+					__func__, uiLog2DataPageSize));
 		}
 	}
 	return ret_value;
@@ -905,11 +1138,13 @@ static IMG_UINT64 RGXDerivePTEProt8(IMG_UINT32 uiProtFlags, IMG_UINT32 uiLog2Dat
 		ui64MMUFlags |= RGX_MMUCTRL_PT_DATA_CC_EN;
 	}
 
+#if defined(RGX_MMUCTRL_PT_DATA_SLC_BYPASS_CTRL_EN)
 	/* cache setup */
 	if ((MMU_PROTFLAGS_CACHED & uiProtFlags) == 0)
 	{
 		ui64MMUFlags |= RGX_MMUCTRL_PT_DATA_SLC_BYPASS_CTRL_EN;
 	}
+#endif
 
 	if ((uiProtFlags & MMU_PROTFLAGS_INVALID) == 0)
 	{
@@ -920,6 +1155,17 @@ static IMG_UINT64 RGXDerivePTEProt8(IMG_UINT32 uiProtFlags, IMG_UINT32 uiLog2Dat
 	{
 		ui64MMUFlags |= RGX_MMUCTRL_PT_DATA_PM_META_PROTECT_EN;
 	}
+
+#if defined(RGX_MMUCTRL_PT_DATA_AXCACHE_WBRWALLOC)
+	/**
+	 * Always enable caching on the fabric level cache irrespective of type of
+	 * cache coherent interconnect and memory cache attributes.
+	 * This needs to be updated, if selective caching policy needs to be
+	 * implemented based on cache attributes requested by caller and based on
+	 * cache coherent interconnect.
+	 */
+	ui64MMUFlags |= RGX_MMUCTRL_PT_DATA_AXCACHE_WBRWALLOC;
+#endif
 
 	return ui64MMUFlags;
 }
@@ -1052,7 +1298,9 @@ static PVRSRV_ERROR RGXGetPageSizeFromPDE4(IMG_UINT32 ui32PDE, IMG_UINT32 *pui32
 
 static PVRSRV_ERROR RGXGetPageSizeFromPDE8(IMG_UINT64 ui64PDE, IMG_UINT32 *pui32Log2PageSize)
 {
-	switch (ui64PDE & (~RGX_MMUCTRL_PD_DATA_PAGE_SIZE_CLRMSK))
+	IMG_UINT64 ui64PageSizeBits = ui64PDE & (~RGX_MMUCTRL_PD_DATA_PAGE_SIZE_CLRMSK);
+
+	switch (ui64PageSizeBits)
 	{
 	case RGX_MMUCTRL_PD_DATA_PAGE_SIZE_4KB:
 		*pui32Log2PageSize = RGX_HEAP_4KB_PAGE_SHIFT;
@@ -1073,7 +1321,105 @@ static PVRSRV_ERROR RGXGetPageSizeFromPDE8(IMG_UINT64 ui64PDE, IMG_UINT32 *pui32
 		*pui32Log2PageSize = RGX_HEAP_2MB_PAGE_SHIFT;
 		break;
 	default:
+		PVR_DPF((PVR_DBG_ERROR,
+				"RGXGetPageSizeFromPDE8: Invalid page size bitfield %" IMG_UINT64_FMTSPECx " in PDE",
+				ui64PageSizeBits));
+
 		return PVRSRV_ERROR_MMU_INVALID_PAGE_SIZE_FOR_DEVICE;
 	}
 	return PVRSRV_OK;
 }
+
+#if defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+/*************************************************************************/ /*!
+@Function       RGXMMU4DerivePDEProt8
+@Description    derive the PDE protection flags based on an 8 byte entry
+
+@Input          uiLog2DataPageSize: ignored as MMU4 doesn't put page size in PD entries.
+
+@Return         PVRSRV_ERROR
+*/ /**************************************************************************/
+static IMG_UINT64 RGXMMU4DerivePDEProt8(IMG_UINT32 uiProtFlags, IMG_UINT32 uiLog2DataPageSize)
+{
+	IMG_UINT64 ret_value = 0; /* 0 means invalid */
+	PVR_UNREFERENCED_PARAMETER(uiLog2DataPageSize);
+
+	if (!(uiProtFlags & MMU_PROTFLAGS_INVALID)) /* if not invalid */
+	{
+		/*  page size in range config registers. Bits in PD entries are reserved */
+		ret_value = RGX_MMUCTRL_PD_DATA_VALID_EN;
+	}
+	return ret_value;
+}
+
+
+/*************************************************************************/ /*!
+@Function       RGXMMU4GetPageSizeFromPDE8
+@Description    The upper layers should be such that this function is never called
+                as pages size are not stored in PD entries for MMU4.
+*/ /**************************************************************************/
+static PVRSRV_ERROR RGXMMU4GetPageSizeFromPDE8(IMG_UINT64 ui64PDE, IMG_UINT32 *pui32Log2PageSize)
+{
+	PVR_UNREFERENCED_PARAMETER(ui64PDE);
+	PVR_UNREFERENCED_PARAMETER(pui32Log2PageSize);
+
+	PVR_ASSERT(0 && "RGXMMU4GetPageSizeFromPDE8 called in error. MMU4 does not store page sizes in PDT.");
+	return PVRSRV_ERROR_MMU_INVALID_PAGE_SIZE_FOR_DEVICE;
+}
+
+
+/*************************************************************************/ /*!
+@Function       RGXMMU4GetPageSizeFromVirtAddr
+@Description    Get page size by walking through range config registers
+                looking for a match against the virtual address.
+*/ /**************************************************************************/
+static PVRSRV_ERROR RGXMMU4GetPageSizeFromVirtAddr(struct _PVRSRV_DEVICE_NODE_ *psDevNode,
+												   IMG_DEV_VIRTADDR sDevVAddr,
+												   IMG_UINT32 *pui32Log2PageSize)
+{
+	PVRSRV_RGXDEV_INFO *psDevInfo = psDevNode->pvDevice;
+	PVRSRV_ERROR eError = PVRSRV_OK;
+	IMG_UINT32 i;
+
+	/* assume default of 4KB page size */
+	*pui32Log2PageSize = 12;
+
+	/* Loop through the range registers looking for the given target address */
+	for (i = 0; i < ARRAY_SIZE(psDevInfo->aui64MMUPageSizeRangeValue); ++i)
+	{
+		IMG_UINT64 ui64RangeVal = psDevInfo->aui64MMUPageSizeRangeValue[i];
+
+		if (ui64RangeVal != 0)
+		{
+			/* end addr in register is inclusive in the range so add 1 to move it over the end */
+			IMG_UINT64 ui64Base = ((ui64RangeVal & ~RGX_CR_MMU_PAGE_SIZE_RANGE_ONE_BASE_ADDR_CLRMSK)
+												>> RGX_CR_MMU_PAGE_SIZE_RANGE_ONE_BASE_ADDR_SHIFT)
+												<< RGX_CR_MMU_PAGE_SIZE_RANGE_ONE_BASE_ADDR_ALIGNSHIFT;
+			IMG_UINT64 ui64End  = (((ui64RangeVal & ~RGX_CR_MMU_PAGE_SIZE_RANGE_ONE_END_ADDR_CLRMSK)
+												>> RGX_CR_MMU_PAGE_SIZE_RANGE_ONE_END_ADDR_SHIFT) + 1)
+												<< RGX_CR_MMU_PAGE_SIZE_RANGE_ONE_END_ADDR_ALIGNSHIFT;
+
+			if ((sDevVAddr.uiAddr >= ui64Base) && (sDevVAddr.uiAddr < ui64End))
+			{
+				IMG_UINT32 ui32PageSizeField = (IMG_UINT32)((ui64RangeVal & ~RGX_CR_MMU_PAGE_SIZE_RANGE_ONE_PAGE_SIZE_CLRMSK)
+														>> RGX_CR_MMU_PAGE_SIZE_RANGE_ONE_PAGE_SIZE_SHIFT);
+				if (ui32PageSizeField < 5)
+				{
+					*pui32Log2PageSize = (ui32PageSizeField << 1) + 12;   /* 12 (4K), 14 (16K), 16 (64K), 18 (256K), 20 (1MB) */
+				}
+				else if (ui32PageSizeField == 5)
+				{
+					*pui32Log2PageSize = 21;    /* 2MB */
+				}
+				else
+				{
+					eError = PVRSRV_ERROR_MMU_INVALID_PAGE_SIZE_FOR_DEVICE;
+				}
+				break;
+			}
+		}
+	}
+
+	return eError;
+}
+#endif

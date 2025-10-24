@@ -52,41 +52,26 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "device.h"
 
-#if defined(SUPPORT_ION)
-#include PVR_ANDROID_ION_HEADER
-#include "ion_sys.h"
-#include "allocmem.h"
-#endif
+struct drm_file;
 
 typedef struct _ENV_CONNECTION_PRIVATE_DATA_
 {
 	PVRSRV_DEVICE_NODE *psDevNode;
+	struct drm_file *psDRMFile;
 } ENV_CONNECTION_PRIVATE_DATA;
 
-#if defined(SUPPORT_ION) && (LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0))
-#define ION_CLIENT_NAME_SIZE	50
-
-typedef struct _ENV_ION_CONNECTION_DATA_
-{
-	IMG_CHAR azIonClientName[ION_CLIENT_NAME_SIZE];
-	struct ion_device *psIonDev;
-	struct ion_client *psIonClient;
-} ENV_ION_CONNECTION_DATA;
-#endif
 
 typedef struct _ENV_CONNECTION_DATA_
 {
 	pid_t owner;
 
 	PVRSRV_DEVICE_NODE *psDevNode;
+	struct drm_file *psDRMFile;
 
 #if defined(SUPPORT_NATIVE_FENCE_SYNC)
 	void *pvPvrSyncPrivateData;
 #endif
 
-#if defined(SUPPORT_ION) && (LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0))
-	ENV_ION_CONNECTION_DATA *psIonData;
-#endif
 } ENV_CONNECTION_DATA;
 
 #endif /* !defined(ENV_CONNECTION_H) */

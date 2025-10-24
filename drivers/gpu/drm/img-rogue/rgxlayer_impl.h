@@ -56,12 +56,14 @@ typedef struct _RGX_LAYER_PARAMS_
 #endif
 
 	IMG_DEV_PHYADDR sPCAddr;
+#if defined(RGX_FEATURE_MIPS_BIT_MASK)
 	IMG_DEV_PHYADDR sGPURegAddr;
 	IMG_DEV_PHYADDR sBootRemapAddr;
 	IMG_DEV_PHYADDR sCodeRemapAddr;
 	IMG_DEV_PHYADDR sDataRemapAddr;
 	IMG_DEV_PHYADDR sTrampolineRemapAddr;
 	IMG_BOOL bDevicePA0IsValid;
+#endif
 } RGX_LAYER_PARAMS;
 
 #endif /* RGXLAYER_IMPL_H */

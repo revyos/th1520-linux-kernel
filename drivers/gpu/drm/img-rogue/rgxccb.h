@@ -49,7 +49,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxdevice.h"
 #include "sync_server.h"
 #include "connection_server.h"
-#include "rgxdebug.h"
+#include "rgxdebug_common.h"
 #include "rgxdefs_km.h"
 #include "pvr_notifier.h"
 
@@ -143,10 +143,10 @@ typedef struct _RGX_CCB_CMD_HELPER_DATA_ {
 	RGXFWIF_CCB_CMD_TYPE	eType;
 	IMG_UINT32				ui32CmdSize;
 	IMG_UINT8				*pui8DMCmd;
-	IMG_UINT32				ui32FenceCmdSize;
 	IMG_UINT32				ui32FBSCInvalCmdSize;
 	IMG_UINT32				ui32DMCmdSize;
-	IMG_UINT32				ui32UpdateCmdSize;
+	IMG_UINT32				ui32TotalSize;
+	IMG_UINT32				ui32DMCmdOffset;
 
 	/* data for FBSC invalidate command */
 	IMG_UINT64				ui64FBSCEntryMask;
@@ -266,8 +266,8 @@ void RGXReleaseCCB(RGX_CLIENT_CCB *psClientCCB,
 IMG_UINT32 RGXGetHostWriteOffsetCCB(RGX_CLIENT_CCB *psClientCCB);
 IMG_UINT32 RGXGetWrapMaskCCB(RGX_CLIENT_CCB *psClientCCB);
 
-PVRSRV_ERROR RGXSetCCBFlags(RGX_CLIENT_CCB *psClientCCB,
-							IMG_UINT32		ui32Flags);
+void RGXSetCCBFlags(RGX_CLIENT_CCB *psClientCCB,
+					IMG_UINT32		ui32Flags);
 
 void RGXCmdHelperInitCmdCCB_CommandSize(PVRSRV_RGXDEV_INFO *psDevInfo,
 										IMG_UINT64 ui64FBSCEntryMask,
@@ -279,7 +279,8 @@ void RGXCmdHelperInitCmdCCB_CommandSize(PVRSRV_RGXDEV_INFO *psDevInfo,
                                         PRGXFWIF_UFO_ADDR       *ppRMWUFOAddr,
                                         RGX_CCB_CMD_HELPER_DATA *psCmdHelperData);
 
-void RGXCmdHelperInitCmdCCB_OtherData(RGX_CLIENT_CCB *psClientCCB,
+void RGXCmdHelperInitCmdCCB_OtherData(PVRSRV_RGXDEV_INFO *psDevInfo,
+                                      RGX_CLIENT_CCB *psClientCCB,
                                       IMG_UINT32 ui32ClientFenceCount,
                                       PRGXFWIF_UFO_ADDR *pauiFenceUFOAddress,
                                       IMG_UINT32 *paui32FenceValue,
@@ -339,7 +340,7 @@ IMG_UINT32 RGXCmdHelperGetCommandOffset(RGX_CCB_CMD_HELPER_DATA *asCmdHelperData
 
 IMG_UINT32 RGXCmdHelperGetDMCommandHeaderOffset(RGX_CCB_CMD_HELPER_DATA *psCmdHelperData);
 
-void DumpStalledCCBCommand(PRGXFWIF_FWCOMMONCONTEXT sFWCommonContext,
+void DumpFirstCCBCmd(PRGXFWIF_FWCOMMONCONTEXT sFWCommonContext,
 				RGX_CLIENT_CCB  *psCurrentClientCCB,
 				DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 				void *pvDumpDebugFile);

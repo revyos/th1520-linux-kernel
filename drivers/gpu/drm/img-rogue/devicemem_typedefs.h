@@ -112,23 +112,6 @@ typedef IMG_UINT32 SPARSE_MEM_RESIZE_FLAGS;
 
 #define SPARSE_RESIZE_BOTH (SPARSE_RESIZE_ALLOC | SPARSE_RESIZE_FREE)
 
-	/* This should be set to silently swap underlying physical memory
-	 * without disturbing its device or cpu virtual maps.
-	 * This flag is not supported in the case of PDUMP and could lead to
-	 * PDUMP panic when used.
-	 */
-#define SPARSE_REMAP_MEM 4U
-
-	/* Should be set to get the sparse changes appear in cpu virtual map */
-#define SPARSE_MAP_CPU_ADDR 8U
-
-
-/* To be used with all the sparse allocations that gets mapped to CPU Virtual
- * space. The sparse allocation CPU mapping is torn down and re-mapped every
- * time the sparse allocation layout changes.
- */
-#define PVRSRV_UNMAP_ON_SPARSE_CHANGE 1
-
 /* To use with DevmemSubAllocate() as the default factor if no over-allocation
  * is desired.
  */
@@ -138,5 +121,11 @@ typedef IMG_UINT32 SPARSE_MEM_RESIZE_FLAGS;
  * annotations stored in memory, including the null terminator.
  */
 #define DEVMEM_ANNOTATION_MAX_LEN ((IMG_UINT32)PVR_ANNOTATION_MAX_LEN + 1U)
+
+
+/* Reserved VA space of a heap must always be multiple of DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+ * Granularity has been chosen to support the max possible practically used OS page size.
+ */
+#define DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY        0x10000 /* 64KB is MAX anticipated OS page size */
 
 #endif /* #ifndef DEVICEMEM_TYPEDEFS_H */

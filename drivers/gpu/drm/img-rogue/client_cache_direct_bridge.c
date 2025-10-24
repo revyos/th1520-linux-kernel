@@ -53,12 +53,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 IMG_INTERNAL PVRSRV_ERROR BridgeCacheOpQueue(IMG_HANDLE hBridge,
 					     IMG_UINT32 ui32NumCacheOps,
-					     IMG_HANDLE * phPMR,
-					     IMG_UINT64 * pui64Address,
-					     IMG_DEVMEM_OFFSET_T * puiOffset,
-					     IMG_DEVMEM_SIZE_T * puiSize,
-					     PVRSRV_CACHE_OP * piuCacheOp,
-					     IMG_UINT32 ui32OpTimeline)
+					     IMG_HANDLE *phPMR,
+					     IMG_UINT64 *pui64Address,
+					     IMG_DEVMEM_OFFSET_T *puiOffset,
+					     IMG_DEVMEM_SIZE_T *puiSize,
+					     PVRSRV_CACHE_OP *piuCacheOp, IMG_UINT32 ui32OpTimeline)
 {
 	PVRSRV_ERROR eError;
 	PMR **psPMRInt;

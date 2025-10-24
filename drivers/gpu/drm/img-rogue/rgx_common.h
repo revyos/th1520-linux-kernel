@@ -54,12 +54,15 @@ extern "C" {
 
 #include "rgx_common_asserts.h"
 
+typedef struct RGXFWIF_DEV_VIRTADDR_
+{
+	IMG_UINT32	ui32Addr;
+} RGXFWIF_DEV_VIRTADDR;
 
 /* Virtualisation validation builds are meant to test the VZ-related hardware without a fully virtualised platform.
- * As such a driver can support either the vz-validation code or real virtualisation.
- * Note: PVRSRV_VZ_NUM_OSID is the external build option, while RGX_NUM_OS_SUPPORTED is the internal symbol used in the DDK */
-#if defined(SUPPORT_GPUVIRT_VALIDATION) && (defined(RGX_NUM_OS_SUPPORTED) && (RGX_NUM_OS_SUPPORTED > 1))
-#error "Invalid build configuration: Virtualisation support (PVRSRV_VZ_NUM_OSID > 1) and virtualisation validation code (SUPPORT_GPUVIRT_VALIDATION) are mutually exclusive."
+ * As such a driver can support either the vz-validation code or real virtualisation. */
+#if defined(SUPPORT_GPUVIRT_VALIDATION) && (defined(RGX_NUM_DRIVERS_SUPPORTED) && (RGX_NUM_DRIVERS_SUPPORTED > 1))
+#error "Invalid build configuration: Virtualisation support (RGX_NUM_DRIVERS_SUPPORTED > 1) and virtualisation validation code (SUPPORT_GPUVIRT_VALIDATION) are mutually exclusive."
 #endif
 
 /* The RGXFWIF_DM defines assume only one of RGX_FEATURE_TLA or
@@ -67,6 +70,19 @@ extern "C" {
  */
 #if defined(RGX_FEATURE_TLA) && defined(RGX_FEATURE_FASTRENDER_DM)
 #error "Both RGX_FEATURE_TLA and RGX_FEATURE_FASTRENDER_DM defined. Fix code to handle this!"
+#endif
+
+#define FW_OSID							(0U)
+#define MMU_CONTEXT_MAPPING_FWPRIV		(0U) /* FW code/private data */
+
+#if (RGX_FW_HEAP_OSID_ASSIGNMENT == RGX_FW_HEAP_USES_FIRMWARE_OSID) || defined(RGX_FEATURE_MIPS)
+/* The Firmware accesses its private code & data and the interface
+ * memory it shares with the KM drivers using the same MMU context */
+#define MMU_CONTEXT_MAPPING_FWIF		MMU_CONTEXT_MAPPING_FWPRIV
+#else
+/* The Firmware accesses the interface memory it shares
+ * with the KM drivers using a reserved MMU context */
+#define MMU_CONTEXT_MAPPING_FWIF		(7U)
 #endif
 
 /*! The master definition for data masters known to the firmware of RGX.
@@ -106,6 +122,17 @@ typedef IMG_UINT32 RGX_KICK_TYPE_DM;
 
 /* Maximum number of DM in use: GP, 2D/TDM, GEOM, 3D, CDM, RDM, GEOM2, GEOM3, GEOM4 */
 #define RGXFWIF_DM_MAX			(RGXFWIF_DM_LAST + 1U)
+/* The set of DMs for gathering stats on GPU utilisation excludes GP */
+#define RGXFWIF_GPU_UTIL_DM_MAX (RGXFWIF_DM_MAX - 1U)
+
+/*!
+ ******************************************************************************
+ * GPU Utilisation states for hwperf
+ *****************************************************************************/
+#define RGXFWIF_GPU_UTIL_STATE_IDLE      (0U)
+#define RGXFWIF_GPU_UTIL_STATE_ACTIVE    (1U)
+#define RGXFWIF_GPU_UTIL_STATE_BLOCKED   (2U)
+#define RGXFWIF_GPU_UTIL_STATE_NUM       (3U)
 
 /*
  * Data Master Tags to be appended to resources created on behalf of each RGX
@@ -168,24 +195,12 @@ typedef IMG_UINT32 RGX_KICK_TYPE_DM;
  *****************************************************************************/
 #define UNCACHED_ALIGN      RGXFW_ALIGN
 
-
-/*!
- ******************************************************************************
- * GPU Utilisation states
- *****************************************************************************/
-#define RGXFWIF_GPU_UTIL_STATE_IDLE      (0U)
-#define RGXFWIF_GPU_UTIL_STATE_ACTIVE    (1U)
-#define RGXFWIF_GPU_UTIL_STATE_BLOCKED   (2U)
-#define RGXFWIF_GPU_UTIL_STATE_NUM       (3U)
-#define RGXFWIF_GPU_UTIL_STATE_MASK      IMG_UINT64_C(0x0000000000000003)
-
-
 /*
  * Maximum amount of register writes that can be done by the register
  * programmer (FW or META DMA). This is not a HW limitation, it is only
  * a protection against malformed inputs to the register programmer.
  */
-#define RGX_MAX_NUM_REGISTER_PROGRAMMER_WRITES  (128U)
+#define RGX_MAX_NUM_REGISTER_PROGRAMMER_WRITES  (256U)
 
 /* FW common context priority. */
 /*!
@@ -193,8 +208,8 @@ typedef IMG_UINT32 RGX_KICK_TYPE_DM;
  * @{
  */
 #define RGX_CTX_PRIORITY_REALTIME  (INT32_MAX)
-#define RGX_CTX_PRIORITY_HIGH      (2U) /*!< HIGH priority */
-#define RGX_CTX_PRIORITY_MEDIUM    (1U) /*!< MEDIUM priority */
+#define RGX_CTX_PRIORITY_HIGH      (2) /*!< HIGH priority */
+#define RGX_CTX_PRIORITY_MEDIUM    (1) /*!< MEDIUM priority */
 #define RGX_CTX_PRIORITY_LOW       (0) /*!< LOW priority */
 /*!
  * @} End of AddToGroup WorkloadContexts
@@ -207,22 +222,26 @@ typedef IMG_UINT32 RGX_KICK_TYPE_DM;
  *
  *                                   0
  *                                   |
- *    -------------------------------x
+ *    ------------------------------xx
  */
 /*
  * Context creation flags
  * (specify a context's properties at creation time)
  */
 #define RGX_CONTEXT_FLAG_DISABLESLR					(1UL << 0) /*!< Disable SLR */
+#define RGX_CONTEXT_FLAG_CDM_TRANSFER				(1UL << 1) /*!< Compute context used for transfers */
 
 /* Bitmask of context flags allowed to be modified after context create. */
 #define RGX_CONTEXT_FLAGS_WRITEABLE_MASK            (RGX_CONTEXT_FLAG_DISABLESLR)
 
 /* List of attributes that may be set for a context */
-typedef enum _RGX_CONTEXT_PROPERTY_
-{
-	RGX_CONTEXT_PROPERTY_FLAGS  = 0, /*!< Context flags */
-} RGX_CONTEXT_PROPERTY;
+typedef IMG_UINT32 RGX_CONTEXT_PROPERTY;
+#define RGX_CONTEXT_PROPERTY_FLAGS 0U /*!< Context flags */
+
+/* MMU4 supported number of ranges */
+#define RGX_MAX_NUM_MMU_PAGE_SIZE_RANGES (4U)
+#define RGX_MMU_RANGE_NON4KHEAP          (0U)
+#define RGX_MMU_RANGE_GLOBAL             (RGX_MAX_NUM_MMU_PAGE_SIZE_RANGES - 1)
 
 #if defined(__cplusplus)
 }

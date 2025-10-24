@@ -123,15 +123,19 @@ PVRSRV_ERROR DIInit(void)
 {
 	PVRSRV_ERROR eError;
 
+#if defined(__linux__) && defined(__KERNEL__)
+	eError = OSLockCreateNoStats(&_g_hLock);
+#else
 	eError = OSLockCreate(&_g_hLock);
+#endif
 	PVR_LOG_GOTO_IF_ERROR(eError, "OSLockCreate", return_);
 
-	_g_psRootGroup = OSAllocMem(sizeof(*_g_psRootGroup));
+	_g_psRootGroup = OSAllocMemNoStats(sizeof(*_g_psRootGroup));
 	PVR_LOG_GOTO_IF_NOMEM(_g_psRootGroup, eError, destroy_lock_);
 
-	_g_psRootGroup->pszName = OSAllocMem(sizeof(ROOT_GROUP_NAME));
+	_g_psRootGroup->pszName = OSAllocMemNoStats(sizeof(ROOT_GROUP_NAME));
 	PVR_LOG_GOTO_IF_NOMEM(_g_psRootGroup->pszName, eError, cleanup_name_);
-	OSStringLCopy(_g_psRootGroup->pszName, ROOT_GROUP_NAME,
+	OSStringSafeCopy(_g_psRootGroup->pszName, ROOT_GROUP_NAME,
 				  sizeof(ROOT_GROUP_NAME));
 
 	dllist_init(&_g_psRootGroup->sListNode);
@@ -142,9 +146,13 @@ PVRSRV_ERROR DIInit(void)
 	return PVRSRV_OK;
 
 cleanup_name_:
-	OSFreeMem(_g_psRootGroup);
+	OSFreeMemNoStats(_g_psRootGroup);
 destroy_lock_:
+#if defined(__linux__) && defined(__KERNEL__)
+	OSLockDestroyNoStats(_g_hLock);
+#else
 	OSLockDestroy(_g_hLock);
+#endif
 return_:
 	return eError;
 }
@@ -205,7 +213,11 @@ void DIDeInit(void)
 
 	/* all resources freed so free the lock itself too */
 
+#if defined(__linux__) && defined(__KERNEL__)
+	OSLockDestroyNoStats(_g_hLock);
+#else
 	OSLockDestroy(_g_hLock);
+#endif
 }
 
 static IMG_BOOL _ValidateIteratorCb(const DI_ITERATOR_CB *psIterCb,
@@ -281,6 +293,7 @@ return_:
 
 static void _DestroyNativeEntry(DI_NATIVE_HANDLE *psNativeEntry)
 {
+	psNativeEntry->psDiImpl->sCb.pfnDestroyEntry(psNativeEntry->pvHandle);
 	dllist_remove_node(&psNativeEntry->sListNode);
 	OSFreeMem(psNativeEntry);
 }
@@ -317,8 +330,6 @@ PVRSRV_ERROR DICreateEntry(const IMG_CHAR *pszName,
 
 	OSLockAcquire(_g_hLock);
 
-	dllist_add_to_tail(&psGroup->sEntryList, &psEntry->sListNode);
-
 	/* Iterate over all of the native handles of parent group to create
 	 * the entry for every registered implementation. */
 	dllist_foreach_node(&psGroup->sNativeHandleList, psThis, psNext)
@@ -329,6 +340,8 @@ PVRSRV_ERROR DICreateEntry(const IMG_CHAR *pszName,
 		eError = _CreateNativeEntry(psEntry, psNativeGroup);
 		PVR_GOTO_IF_ERROR(eError, cleanup_);
 	}
+
+	dllist_add_to_tail(&psGroup->sEntryList, &psEntry->sListNode);
 
 	OSLockRelease(_g_hLock);
 
@@ -376,9 +389,7 @@ void DIDestroyEntry(DI_ENTRY *psEntry)
 		 * This will guarantee proper synchronisation between the DI framework
 		 * and underlying implementations and prevent destruction/access
 		 * races. */
-		psNative->psDiImpl->sCb.pfnDestroyEntry(psNative->pvHandle);
-		dllist_remove_node(&psNative->sListNode);
-		OSFreeMem(psNative);
+		_DestroyNativeEntry(psNative);
 	}
 
 	dllist_remove_node(&psEntry->sListNode);
@@ -415,10 +426,11 @@ return_:
 	return eError;
 }
 
-static void _DestroyNativeGroup(DI_NATIVE_HANDLE *psNativeEntry)
+static void _DestroyNativeGroup(DI_NATIVE_HANDLE *psNativeGroup)
 {
-	dllist_remove_node(&psNativeEntry->sListNode);
-	OSFreeMem(psNativeEntry);
+	psNativeGroup->psDiImpl->sCb.pfnDestroyGroup(psNativeGroup->pvHandle);
+	dllist_remove_node(&psNativeGroup->sListNode);
+	OSFreeMem(psNativeGroup);
 }
 
 PVRSRV_ERROR DICreateGroup(const IMG_CHAR *pszName,
@@ -444,7 +456,7 @@ PVRSRV_ERROR DICreateGroup(const IMG_CHAR *pszName,
 	uSize = OSStringLength(pszName) + 1;
 	psGroup->pszName = OSAllocMem(uSize * sizeof(*psGroup->pszName));
 	PVR_LOG_GOTO_IF_NOMEM(psGroup->pszName, eError, cleanup_name_);
-	OSStringLCopy(psGroup->pszName, pszName, uSize);
+	OSStringSafeCopy(psGroup->pszName, pszName, uSize);
 
 	psGroup->psParent = psParent;
 	dllist_init(&psGroup->sGroupList);
@@ -452,8 +464,6 @@ PVRSRV_ERROR DICreateGroup(const IMG_CHAR *pszName,
 	dllist_init(&psGroup->sNativeHandleList);
 
 	OSLockAcquire(_g_hLock);
-
-	dllist_add_to_tail(&psParent->sGroupList, &psGroup->sListNode);
 
 	/* Iterate over all of the native handles of parent group to create
 	 * the group for every registered implementation. */
@@ -465,6 +475,8 @@ PVRSRV_ERROR DICreateGroup(const IMG_CHAR *pszName,
 		eError = _CreateNativeGroup(psGroup, psNativeParent, &psNativeGroup);
 		PVR_GOTO_IF_ERROR(eError, cleanup_);
 	}
+
+	dllist_add_to_tail(&psParent->sGroupList, &psGroup->sListNode);
 
 	OSLockRelease(_g_hLock);
 
@@ -482,8 +494,7 @@ cleanup_:
 		DI_NATIVE_HANDLE *psNativeGroup =
 		        IMG_CONTAINER_OF(psThis, DI_NATIVE_HANDLE, sListNode);
 
-		dllist_remove_node(&psNativeGroup->sListNode);
-		OSFreeMem(psNativeGroup);
+		_DestroyNativeGroup(psNativeGroup);
 	}
 
 	OSFreeMem(psGroup->pszName);
@@ -515,8 +526,16 @@ void DIDestroyGroup(DI_GROUP *psGroup)
 
 	dllist_remove_node(&psGroup->sListNode);
 
-	OSFreeMem(psGroup->pszName);
-	OSFreeMem(psGroup);
+	if (psGroup == _g_psRootGroup)
+	{
+		OSFreeMemNoStats(psGroup->pszName);
+		OSFreeMemNoStats(psGroup);
+	}
+	else
+	{
+		OSFreeMem(psGroup->pszName);
+		OSFreeMem(psGroup);
+	}
 }
 
 void *DIGetPrivData(const OSDI_IMPL_ENTRY *psEntry)
@@ -658,12 +677,13 @@ static void _DeInitNativeHandlesRecursively(DI_IMPL *psImpl, DI_GROUP *psGroup)
 	dllist_foreach_node(&psGroup->sEntryList, psThis, psNext)
 	{
 		DI_ENTRY *psThisEntry = IMG_CONTAINER_OF(psThis, DI_ENTRY, sListNode);
+		DLLIST_NODE *psNativeThis, *psNativeNext;
 
 		// free all of the native entries that belong to this implementation
-		dllist_foreach_node(&psThisEntry->sNativeHandleList, psThis, psNext)
+		dllist_foreach_node(&psThisEntry->sNativeHandleList, psNativeThis, psNativeNext)
 		{
 			DI_NATIVE_HANDLE *psNativeEntry =
-			        IMG_CONTAINER_OF(psThis, DI_NATIVE_HANDLE, sListNode);
+			        IMG_CONTAINER_OF(psNativeThis, DI_NATIVE_HANDLE, sListNode);
 
 			if (psNativeEntry->psDiImpl == psImpl)
 			{

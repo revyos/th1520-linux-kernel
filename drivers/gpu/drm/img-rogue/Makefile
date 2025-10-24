@@ -12,7 +12,3 @@ ccflags-y += \
  -D__linux__
 
 include $(img_basedir)/pvrsrvkm.mk
-
-obj-$(CONFIG_DRM_POWERVR_ROGUE)	+= drm_nulldisp.o
-
-drm_nulldisp-y	+= drm_nulldisp_drv.o drm_nulldisp_netlink.o drm_netlink_gem.o drm_nulldisp_gem.o
