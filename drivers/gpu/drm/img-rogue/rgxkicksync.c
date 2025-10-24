@@ -46,7 +46,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "rgxdevice.h"
 #include "rgxmem.h"
+#include "rgxutils.h"
 #include "rgxfwutils.h"
+#include "rgxfwcmnctx.h"
 #include "allocmem.h"
 #include "sync.h"
 #include "rgxhwperf.h"
@@ -65,6 +67,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #else
 #define CHKPT_DBG(X)
 #endif
+
 
 struct _RGX_SERVER_KICKSYNC_CONTEXT_
 {
@@ -165,17 +168,9 @@ PVRSRV_ERROR PVRSRVRGXDestroyKickSyncContextKM(RGX_SERVER_KICKSYNC_CONTEXT * psK
 	                                          RGXFWIF_DM_GP,
 	                                          PDUMP_FLAGS_NONE);
 
-	if (eError == PVRSRV_ERROR_RETRY)
-	{
-		return eError;
-	}
-	else if (eError != PVRSRV_OK)
-	{
-		PVR_LOG(("%s: Unexpected error from RGXFWRequestCommonContextCleanUp (%s)",
-				__func__,
-				PVRSRVGetErrorString(eError)));
-		return eError;
-	}
+	RGX_RETURN_IF_ERROR_AND_DEVICE_RECOVERABLE(psKickSyncContext->psDeviceNode,
+						   eError,
+						   RGXFWRequestCommonContextCleanUp);
 
 	/* ... it has so we can free its resources */
 
@@ -184,6 +179,7 @@ PVRSRV_ERROR PVRSRVRGXDestroyKickSyncContextKM(RGX_SERVER_KICKSYNC_CONTEXT * psK
 	OSWRLockReleaseWrite(psDevInfo->hKickSyncCtxListLock);
 
 	FWCommonContextFree(psKickSyncContext->psServerCommonContext);
+	psKickSyncContext->psServerCommonContext = NULL;
 
 	SyncAddrListDeinit(&psKickSyncContext->sSyncAddrListFence);
 	SyncAddrListDeinit(&psKickSyncContext->sSyncAddrListUpdate);
@@ -191,37 +187,6 @@ PVRSRV_ERROR PVRSRVRGXDestroyKickSyncContextKM(RGX_SERVER_KICKSYNC_CONTEXT * psK
 	OSLockDestroy(psKickSyncContext->hLock);
 
 	OSFreeMem(psKickSyncContext);
-
-	return PVRSRV_OK;
-}
-
-PVRSRV_ERROR PVRSRVRGXSetKickSyncContextPropertyKM(RGX_SERVER_KICKSYNC_CONTEXT *psKickSyncContext,
-                                                   RGX_CONTEXT_PROPERTY eContextProperty,
-                                                   IMG_UINT64 ui64Input,
-                                                   IMG_UINT64 *pui64Output)
-{
-	PVRSRV_ERROR eError = PVRSRV_OK;
-
-	switch (eContextProperty)
-	{
-		case RGX_CONTEXT_PROPERTY_FLAGS:
-		{
-			IMG_UINT32 ui32ContextFlags = (IMG_UINT32)ui64Input;
-
-			OSLockAcquire(psKickSyncContext->hLock);
-			eError = FWCommonContextSetFlags(psKickSyncContext->psServerCommonContext,
-			                                 ui32ContextFlags);
-
-			OSLockRelease(psKickSyncContext->hLock);
-			break;
-		}
-
-		default:
-		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: PVRSRV_ERROR_NOT_SUPPORTED - asked to set unknown property (%d)", __func__, eContextProperty));
-			eError = PVRSRV_ERROR_NOT_SUPPORTED;
-		}
-	}
 
 	return eError;
 }
@@ -277,6 +242,7 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
                                  SYNC_PRIMITIVE_BLOCK       ** pauiClientUpdateUFODevVarBlock,
                                  IMG_UINT32                  * paui32ClientUpdateOffset,
                                  IMG_UINT32                  * paui32ClientUpdateValue,
+                                 IMG_UINT32                    ui32FWCmdSize,
                                  PVRSRV_FENCE                  iCheckFence,
                                  PVRSRV_TIMELINE               iUpdateTimeline,
                                  PVRSRV_FENCE                * piUpdateFence,
@@ -286,7 +252,6 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	RGXFWIF_KCCB_CMD         sKickSyncKCCBCmd;
 	RGX_CCB_CMD_HELPER_DATA  asCmdHelperData[1];
 	PVRSRV_ERROR             eError;
-	PVRSRV_ERROR             eError2;
 	IMG_BOOL                 bCCBStateOpen = IMG_FALSE;
 	PRGXFWIF_UFO_ADDR        *pauiClientFenceUFOAddress = NULL;
 	PRGXFWIF_UFO_ADDR        *pauiClientUpdateUFOAddress = NULL;
@@ -299,6 +264,7 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	IMG_UINT32               ui32IntJobRef = OSAtomicIncrement(&psDevInfo->iCCBSubmissionOrdinal);
 	IMG_UINT64               uiCheckFenceUID = 0;
 	IMG_UINT64               uiUpdateFenceUID = 0;
+	IMG_PUINT8               pui8FWCmd = NULL;
 	PSYNC_CHECKPOINT psUpdateSyncCheckpoint = NULL;
 	PSYNC_CHECKPOINT *apsFenceSyncCheckpoints = NULL;
 	IMG_UINT32 ui32FenceSyncCheckpointCount = 0;
@@ -318,6 +284,13 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 		                        PVRSRV_ERROR_INVALID_PARAMS);
 	}
 
+	if (ui32FWCmdSize > RGXFWIF_DM_INDEPENDENT_KICK_CMD_SIZE)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: invalid FW command size",
+				 __func__));
+		return PVRSRV_ERROR_INVALID_PARAMS;
+	}
+
 	OSLockAcquire(psKickSyncContext->hLock);
 	eError = SyncAddrListPopulate(&psKickSyncContext->sSyncAddrListUpdate,
 							ui32ClientUpdateCount,
@@ -334,7 +307,7 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 		pauiClientUpdateUFOAddress = psKickSyncContext->sSyncAddrListUpdate.pasFWAddrs;
 	}
 	/* Ensure the string is null-terminated (Required for safety) */
-	szUpdateFenceName[31] = '\0';
+	szUpdateFenceName[PVRSRV_SYNC_NAME_LENGTH-1] = '\0';
 
 	/* This will never be true if called from the bridge since piUpdateFence will always be valid */
 	if (iUpdateTimeline >= 0 && !piUpdateFence)
@@ -447,10 +420,9 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 		SyncAddrListAppendCheckpoints(&psKickSyncContext->sSyncAddrListFence,
 									  ui32FenceSyncCheckpointCount,
 									  apsFenceSyncCheckpoints);
-		if (!pauiClientFenceUFOAddress)
-		{
-			pauiClientFenceUFOAddress = psKickSyncContext->sSyncAddrListFence.pasFWAddrs;
-		}
+
+		pauiClientFenceUFOAddress = psKickSyncContext->sSyncAddrListFence.pasFWAddrs;
+
 		ui32ClientFenceCount += ui32FenceSyncCheckpointCount;
 #if defined(KICKSYNC_CHECKPOINT_DEBUG)
 			{
@@ -594,6 +566,13 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 		}
 #endif
 
+	if (ui32FWCmdSize > 0)
+	{
+		pui8FWCmd = OSAllocMem(ui32FWCmdSize);
+		PVR_GOTO_IF_NOMEM(pui8FWCmd, eError, fail_fwcmd);
+		memset(pui8FWCmd, 0xFF, ui32FWCmdSize);
+	}
+
 	RGXCmdHelperInitCmdCCB(psDevInfo,
 	                       psClientCCB,
 	                       0, /* empty ui64FBSCEntryMask */
@@ -603,8 +582,8 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	                       ui32ClientUpdateCount,
 	                       pauiClientUpdateUFOAddress,
 	                       paui32ClientUpdateValue,
-	                       0,
-	                       NULL,
+	                       ui32FWCmdSize,
+	                       pui8FWCmd,
 	                       NULL,
 	                       NULL,
 	                       NULL,
@@ -620,8 +599,9 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	eError = RGXCmdHelperAcquireCmdCCB(ARRAY_SIZE(asCmdHelperData), asCmdHelperData);
 	if (eError != PVRSRV_OK)
 	{
-		goto fail_cmdaquire;
+		goto fail_cmdacquire;
 	}
+
 
 	/*
 	 *  We should reserve space in the kernel CCB here and fill in the command
@@ -631,20 +611,27 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	 */
 
 	/*
-	 * We might only be kicking for flush out a padding packet so only submit
-	 * the command if the create was successful
+	 * All the required resources are ready at this point, we can't fail so
+	 * take the required server sync operations and commit all the resources
 	 */
-	if (eError == PVRSRV_OK)
+	eError = PVRSRVPowerLock(psDevInfo->psDeviceNode);
+	if (unlikely(eError != PVRSRV_OK))
 	{
-		/*
-		 * All the required resources are ready at this point, we can't fail so
-		 * take the required server sync operations and commit all the resources
-		 */
-		RGXCmdHelperReleaseCmdCCB(1,
-		                          asCmdHelperData,
-		                          "KickSync",
-		                          FWCommonContextGetFWAddress(psKickSyncContext->psServerCommonContext).ui32Addr);
+		PVR_DPF((PVR_DBG_WARNING, "%s: failed to acquire powerlock (%s)",
+			__func__, PVRSRVGetErrorString(eError)));
+
+		/* If system is found powered OFF, Retry scheduling the command */
+		if (likely(eError == PVRSRV_ERROR_SYSTEM_STATE_POWERED_OFF))
+		{
+			eError = PVRSRV_ERROR_RETRY;
+		}
+		goto fail_acquirepowerlock;
 	}
+
+	RGXCmdHelperReleaseCmdCCB(1,
+							  asCmdHelperData,
+							  "KickSync",
+							  FWCommonContextGetFWAddress(psKickSyncContext->psServerCommonContext).ui32Addr);
 
 	/* Construct the kernel kicksync CCB command. */
 	sKickSyncKCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_KICK;
@@ -653,7 +640,9 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	sKickSyncKCCBCmd.uCmdData.sCmdKickData.ui32CWrapMaskUpdate = RGXGetWrapMaskCCB(psClientCCB);
 
 	sKickSyncKCCBCmd.uCmdData.sCmdKickData.ui32NumCleanupCtl = 0;
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
 	sKickSyncKCCBCmd.uCmdData.sCmdKickData.ui32WorkEstCmdHeaderOffset = 0;
+#endif
 
 	/*
 	 * Submit the kicksync command to the firmware.
@@ -663,7 +652,7 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	                  ui32FWCtx,
 	                  ui32ExtJobRef,
 	                  ui32IntJobRef,
-	                  RGX_HWPERF_KICK_TYPE_SYNC,
+	                  RGX_HWPERF_KICK_TYPE2_SYNC,
 	                  iCheckFence,
 	                  iUpdateFence,
 	                  iUpdateTimeline,
@@ -672,42 +661,31 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	                  NO_DEADLINE,
 	                  NO_CYCEST);
 
-	LOOP_UNTIL_TIMEOUT(MAX_HW_TIME_US)
+	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
 	{
-		eError2 = RGXScheduleCommand(psKickSyncContext->psDeviceNode->pvDevice,
+		eError = RGXScheduleCommandWithoutPowerLock(psKickSyncContext->psDeviceNode->pvDevice,
 		                             RGXFWIF_DM_GP,
 		                             & sKickSyncKCCBCmd,
 		                             PDUMP_FLAGS_NONE);
-		if (eError2 != PVRSRV_ERROR_RETRY)
+		if (eError != PVRSRV_ERROR_RETRY)
 		{
 			break;
 		}
 		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
-	} END_LOOP_UNTIL_TIMEOUT();
+	} END_LOOP_UNTIL_TIMEOUT_US();
 
-	PVRGpuTraceEnqueueEvent(psKickSyncContext->psDeviceNode->pvDevice,
+	PVRSRVPowerUnlock(psDevInfo->psDeviceNode);
+
+	PVRGpuTraceEnqueueEvent(psKickSyncContext->psDeviceNode,
 	                        ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
-	                        RGX_HWPERF_KICK_TYPE_SYNC);
+	                        RGX_HWPERF_KICK_TYPE2_SYNC);
 
-	if (eError2 != PVRSRV_OK)
+	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,
 		         "PVRSRVRGXKickSync failed to schedule kernel CCB command. (0x%x)",
 		         eError));
-		if (eError == PVRSRV_OK)
-		{
-			eError = eError2;
-		}
-	}
-
-	/*
-	 * Now check eError (which may have returned an error from our earlier call
-	 * to RGXCmdHelperAcquireCmdCCB) - we needed to process any flush command first
-	 * so we check it now...
-	 */
-	if (eError != PVRSRV_OK )
-	{
-		goto fail_cmdaquire;
+		goto fail_cmdacquire;
 	}
 
 #if defined(NO_HARDWARE)
@@ -747,6 +725,11 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 		pui32IntAllocatedUpdateValues = NULL;
 	}
 
+	if (pui8FWCmd)
+	{
+		OSFreeMem(pui8FWCmd);
+	}
+
 	*piUpdateFence = iUpdateFence;
 	if (pvUpdateFenceFinaliseData && (iUpdateFence != PVRSRV_NO_FENCE))
 	{
@@ -758,7 +741,13 @@ PVRSRV_ERROR PVRSRVRGXKickSyncKM(RGX_SERVER_KICKSYNC_CONTEXT * psKickSyncContext
 	OSLockRelease(psKickSyncContext->hLock);
 	return PVRSRV_OK;
 
-fail_cmdaquire:
+fail_acquirepowerlock:
+fail_cmdacquire:
+	if (pui8FWCmd)
+	{
+		OSFreeMem(pui8FWCmd);
+	}
+fail_fwcmd:
 	SyncAddrListRollbackCheckpoints(psKickSyncContext->psDeviceNode, &psKickSyncContext->sSyncAddrListFence);
 	SyncAddrListRollbackCheckpoints(psKickSyncContext->psDeviceNode, &psKickSyncContext->sSyncAddrListUpdate);
 	if (iUpdateFence != PVRSRV_NO_FENCE)

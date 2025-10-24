@@ -48,6 +48,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv_tlcommon.h"
 #include "lock.h"
 #include "tlstream.h"
+#include "dllist.h"
 
 /* Forward declarations */
 typedef struct _TL_SNODE_* PTL_SNODE;
@@ -79,10 +80,18 @@ typedef struct _TL_SNODE_* PTL_SNODE;
  *
  *      ui32Read < ui32Write <= ui32Pending
  *        where < and <= operators are overloaded to make sense in a circular way.
+ *    ui32RefCount -  Number of other streams referencing this one. Set to 1
+ *                    on initial allocation unless there is already a HWPerf
+ *                    DeferredFree stream in existence.
+ *                    In this case the initial value will
+ *                    be set to 2 to prevent a generating stream (e.g.
+ *                    hwperf_client... ) being destroyed before the
+ *                    consumer has a chance to obtain the data from the stream.
+ *                    Stream can only be destroyed when ui32RefCount == 1.
  */
 typedef struct _TL_STREAM_
 {
-	IMG_CHAR                szName[PRVSRVTL_MAX_STREAM_NAME_SIZE];  /*!< String name identifier */
+	IMG_CHAR                szName[PVRSRVTL_MAX_STREAM_NAME_SIZE];  /*!< String name identifier */
 	TL_OPMODE               eOpMode;                                /*!< Mode of Operation of TL Buffer */
 
 	IMG_BOOL                bWaitForEmptyOnDestroy;                 /*!< Flag: On destroying a non-empty stream block until
@@ -91,11 +100,17 @@ typedef struct _TL_STREAM_
                                                                          *         that new data is available on every commit. Producers
                                                                          *         using this flag will need to manually signal when
                                                                          *         appropriate using the TLStreamSync() API */
+	IMG_BOOL                bAsyncClose;                            /*!< Flag: Used to track asynchronous closes where there is
+                                                                         *         a deferred freeing of the Stream needed. The
+                                                                         *         manipulation of the WRefCount is special-cased
+                                                                         *         when set to avoid underflow of the uiWRefCount. */
 
-	void                    (*pfOnReaderOpenCallback)(void *pvArg); /*!< Optional on reader connect callback */
-	void                    *pvOnReaderOpenUserData;                /*!< On reader connect user data */
-	void                    (*pfProducerCallback)(void);            /*!< Optional producer callback of type TL_STREAM_SOURCECB */
-	void                    *pvProducerUserData;                    /*!< Producer callback user data */
+	TL_STREAM_ONREADEROPENCB  pfOnReaderOpenCallback;               /*!< Optional on reader connect callback */
+	void                      *pvOnReaderOpenUserData;              /*!< On reader connect user data */
+	TL_STREAM_ONREADERCLOSECB pfOnReaderCloseCallback;              /*!< Optional on reader disconnect callback */
+	void                      *pvOnReaderCloseUserData;             /*!< On reader disconnect user data */
+	TL_STREAM_SOURCECB        pfProducerCallback;                   /*!< Optional producer callback */
+	void                      *pvProducerUserData;                  /*!< Producer callback user data */
 
 	struct _TL_STREAM_      *psNotifStream;                         /*!< Pointer to the stream to which notification will be sent */
 
@@ -117,6 +132,7 @@ typedef struct _TL_STREAM_
 	IMG_BOOL                bSignalPending;                         /*!< Tracks if a "signal" is pending to be sent to a blocked/
 	                                                                     *    waiting reader */
 
+	IMG_INT32               i32RefCount;                            /*!< Number of streams referencing this stream */
 	POS_LOCK                hStreamWLock;                           /*!< Writers Lock for ui32Pending & ui32Write*/
 	POS_LOCK                hReadLock;                              /*!< Readers Lock for bReadPending & ui32Read*/
 	IMG_BOOL                bReadPending;                           /*!< Tracks if a read operation is pending or not*/
@@ -215,12 +231,13 @@ PTL_STREAM_DESC TLMakeStreamDesc(PTL_SNODE f1, IMG_UINT32 f2, IMG_HANDLE f3);
  */
 typedef struct _TL_SNODE_
 {
-	struct _TL_SNODE_*	psNext;				/*!< Linked list next element */
-	IMG_HANDLE			hReadEventObj;		/*!< Readers 'wait for data' event */
-	PTL_STREAM			psStream;			/*!< TL Stream object */
-	IMG_INT				uiWRefCount;		/*!< Stream writer reference count */
-	PTL_STREAM_DESC		psRDesc;			/*!< Stream reader 0 or ptr only */
-	PTL_STREAM_DESC		psWDesc;			/*!< Stream writer 0 or ptr only */
+	DLLIST_NODE         sNodeList;		/*!< Linked list of TL_SNODE */
+	IMG_HANDLE          hReadEventObj;	/*!< Readers 'wait for data' event */
+	PTL_STREAM          psStream;		/*!< TL Stream object */
+	IMG_INT             uiWRefCount;	/*!< Stream writer reference count */
+	IMG_INT32           i32RefCount;	/*!< Stream reference count */
+	PTL_STREAM_DESC     psRDesc;		/*!< Stream reader 0 or ptr only */
+	PTL_STREAM_DESC     psWDesc;		/*!< Stream writer 0 or ptr only */
 } TL_SNODE;
 
 PTL_SNODE TLMakeSNode(IMG_HANDLE f2, TL_STREAM *f3, TL_STREAM_DESC *f4);
@@ -242,11 +259,24 @@ typedef struct _TL_GDATA_
 {
 	IMG_HANDLE hTLEventObj;        /* Global TL signal object, new streams, etc */
 
-	IMG_UINT   uiClientCnt;        /* Counter to track the number of client stream connections. */
-	PTL_SNODE  psHead;             /* List of TL streams and associated client handle */
+	IMG_UINT32 uiClientCnt;        /* Counter to track the number of client stream connections. */
+	IMG_UINT32 uiTLDeferredFrees;  /* Flag and count of deferred frees. Top bit
+	                                * is set if we are using DeferredFree and
+	                                * the lower bits are used for the number of
+	                                * deferred items present.
+	                                */
+	DLLIST_NODE sNodeListHead;     /* List of TL streams and associated client handles */
 
 	POS_LOCK   hTLGDLock;          /* Lock for structure AND psHead SNODE list */
 } TL_GLOBAL_DATA, *PTL_GLOBAL_DATA;
+
+#define TL_DEFERRED_FREE_BIT		IMG_UINT32_C(0x80000000)
+#define TL_HAS_DEFERRED_FREE(x)		(((x) & TL_DEFERRED_FREE_BIT) ? IMG_TRUE : IMG_FALSE)
+#define TL_DEFERRED_FREE_COUNT(x)	((x) & ~TL_DEFERRED_FREE_BIT)
+#define TL_DEFERRED_MAX_COUNT		(TL_DEFERRED_FREE_BIT - 1U)
+#define TL_DEFERRED_FREE_INC(x)		{ if (TL_DEFERRED_FREE_COUNT((x)) < TL_DEFERRED_MAX_COUNT) \
+										(x)++; \
+									}
 
 /*
  * Transport Layer Internal Kernel-Mode Server API
@@ -260,7 +290,7 @@ void TLAddStreamNode(PTL_SNODE psAdd);
 PTL_SNODE TLFindStreamNodeByName(const IMG_CHAR *pszName);
 PTL_SNODE TLFindStreamNodeByDesc(PTL_STREAM_DESC psDesc);
 IMG_UINT32 TLDiscoverStreamNodes(const IMG_CHAR *pszNamePattern,
-                          IMG_CHAR aaszStreams[][PRVSRVTL_MAX_STREAM_NAME_SIZE],
+                          IMG_CHAR aaszStreams[][PVRSRVTL_MAX_STREAM_NAME_SIZE],
                           IMG_UINT32 ui32Max);
 PTL_SNODE TLFindAndGetStreamNodeByDesc(PTL_STREAM_DESC psDesc);
 void TLReturnStreamNode(PTL_SNODE psNode);
@@ -338,6 +368,26 @@ void TLStreamDestroy(PTL_STREAM psStream);
 PVRSRV_ERROR TUtilsInit(PVRSRV_DEVICE_NODE *psDeviceNode);
 PVRSRV_ERROR TUtilsDeinit(PVRSRV_DEVICE_NODE *psDeviceNode);
 
+/******************************************************************************
+ Function Name   : TLActivateDeferredFree
+
+ Description     : This function enables Deferred Free functionality associated
+                   with the Transport Layer. This results in an extra reference
+                   being made to any already existing TLClient entries and will
+                   result in these streams being made accessible until the
+                   corresponding TLDeactivateDeferredFree() call is made.
+******************************************************************************/
+void TLActivateDeferredFree(void);
+/******************************************************************************
+ Function Name  :  TLDeactivateDeferredFree
+
+ Description    :  This function disables the DeferredFree functionality
+                   associated with the Transport Layer and adjusts any entries
+                   which are on the deferred free list by reducing their
+                   reference counts to enable a subsequent TLClose() to free
+                   the resource.
+******************************************************************************/
+void TLDeactivateDeferredFree(void);
 
 #endif /* TLINTERN_H */
 /******************************************************************************

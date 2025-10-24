@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -67,10 +64,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXSetBreakpoint(IMG_UINT32 ui32DispatchTableEntry,
-			     IMG_UINT8 * psRGXSetBreakpointIN_UI8,
-			     IMG_UINT8 * psRGXSetBreakpointOUT_UI8, CONNECTION_DATA * psConnection)
+			     IMG_UINT8 *psRGXSetBreakpointIN_UI8,
+			     IMG_UINT8 *psRGXSetBreakpointOUT_UI8, CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXSETBREAKPOINT *psRGXSetBreakpointIN =
 	    (PVRSRV_BRIDGE_IN_RGXSETBREAKPOINT *) IMG_OFFSET_ADDR(psRGXSetBreakpointIN_UI8, 0);
@@ -100,6 +97,7 @@ PVRSRVBridgeRGXSetBreakpoint(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVRGXSetBreakpointKM(psConnection, OSGetDevNode(psConnection),
 				     hPrivDataInt,
 				     psRGXSetBreakpointIN->eFWDataMaster,
+				     psRGXSetBreakpointIN->ui64TempSpillingAddr,
 				     psRGXSetBreakpointIN->ui32BreakpointAddr,
 				     psRGXSetBreakpointIN->ui32HandlerAddr,
 				     psRGXSetBreakpointIN->ui32DM);
@@ -118,14 +116,14 @@ RGXSetBreakpoint_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXSETBREAKPOINT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXClearBreakpoint(IMG_UINT32 ui32DispatchTableEntry,
-			       IMG_UINT8 * psRGXClearBreakpointIN_UI8,
-			       IMG_UINT8 * psRGXClearBreakpointOUT_UI8,
-			       CONNECTION_DATA * psConnection)
+			       IMG_UINT8 *psRGXClearBreakpointIN_UI8,
+			       IMG_UINT8 *psRGXClearBreakpointOUT_UI8,
+			       CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXCLEARBREAKPOINT *psRGXClearBreakpointIN =
 	    (PVRSRV_BRIDGE_IN_RGXCLEARBREAKPOINT *) IMG_OFFSET_ADDR(psRGXClearBreakpointIN_UI8, 0);
@@ -169,14 +167,14 @@ RGXClearBreakpoint_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXCLEARBREAKPOINT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXEnableBreakpoint(IMG_UINT32 ui32DispatchTableEntry,
-				IMG_UINT8 * psRGXEnableBreakpointIN_UI8,
-				IMG_UINT8 * psRGXEnableBreakpointOUT_UI8,
-				CONNECTION_DATA * psConnection)
+				IMG_UINT8 *psRGXEnableBreakpointIN_UI8,
+				IMG_UINT8 *psRGXEnableBreakpointOUT_UI8,
+				CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXENABLEBREAKPOINT *psRGXEnableBreakpointIN =
 	    (PVRSRV_BRIDGE_IN_RGXENABLEBREAKPOINT *) IMG_OFFSET_ADDR(psRGXEnableBreakpointIN_UI8,
@@ -221,14 +219,14 @@ RGXEnableBreakpoint_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXENABLEBREAKPOINT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXDisableBreakpoint(IMG_UINT32 ui32DispatchTableEntry,
-				 IMG_UINT8 * psRGXDisableBreakpointIN_UI8,
-				 IMG_UINT8 * psRGXDisableBreakpointOUT_UI8,
-				 CONNECTION_DATA * psConnection)
+				 IMG_UINT8 *psRGXDisableBreakpointIN_UI8,
+				 IMG_UINT8 *psRGXDisableBreakpointOUT_UI8,
+				 CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXDISABLEBREAKPOINT *psRGXDisableBreakpointIN =
 	    (PVRSRV_BRIDGE_IN_RGXDISABLEBREAKPOINT *) IMG_OFFSET_ADDR(psRGXDisableBreakpointIN_UI8,
@@ -273,14 +271,14 @@ RGXDisableBreakpoint_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXDISABLEBREAKPOINT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXOverallocateBPRegisters(IMG_UINT32 ui32DispatchTableEntry,
-				       IMG_UINT8 * psRGXOverallocateBPRegistersIN_UI8,
-				       IMG_UINT8 * psRGXOverallocateBPRegistersOUT_UI8,
-				       CONNECTION_DATA * psConnection)
+				       IMG_UINT8 *psRGXOverallocateBPRegistersIN_UI8,
+				       IMG_UINT8 *psRGXOverallocateBPRegistersOUT_UI8,
+				       CONNECTION_DATA *psConnection)
 {
 	PVRSRV_BRIDGE_IN_RGXOVERALLOCATEBPREGISTERS *psRGXOverallocateBPRegistersIN =
 	    (PVRSRV_BRIDGE_IN_RGXOVERALLOCATEBPREGISTERS *)
@@ -294,7 +292,7 @@ PVRSRVBridgeRGXOverallocateBPRegisters(IMG_UINT32 ui32DispatchTableEntry,
 					       psRGXOverallocateBPRegistersIN->ui32TempRegs,
 					       psRGXOverallocateBPRegistersIN->ui32SharedRegs);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXOVERALLOCATEBPREGISTERS, eError);
 }
 
 /* ***************************************************************************
@@ -315,23 +313,33 @@ PVRSRV_ERROR InitRGXBREAKPOINTBridge(void)
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXBREAKPOINT,
 			      PVRSRV_BRIDGE_RGXBREAKPOINT_RGXSETBREAKPOINT,
-			      PVRSRVBridgeRGXSetBreakpoint, NULL);
+			      PVRSRVBridgeRGXSetBreakpoint, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_RGXSETBREAKPOINT),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXSETBREAKPOINT));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXBREAKPOINT,
 			      PVRSRV_BRIDGE_RGXBREAKPOINT_RGXCLEARBREAKPOINT,
-			      PVRSRVBridgeRGXClearBreakpoint, NULL);
+			      PVRSRVBridgeRGXClearBreakpoint, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_RGXCLEARBREAKPOINT),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXCLEARBREAKPOINT));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXBREAKPOINT,
 			      PVRSRV_BRIDGE_RGXBREAKPOINT_RGXENABLEBREAKPOINT,
-			      PVRSRVBridgeRGXEnableBreakpoint, NULL);
+			      PVRSRVBridgeRGXEnableBreakpoint, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_RGXENABLEBREAKPOINT),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXENABLEBREAKPOINT));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXBREAKPOINT,
 			      PVRSRV_BRIDGE_RGXBREAKPOINT_RGXDISABLEBREAKPOINT,
-			      PVRSRVBridgeRGXDisableBreakpoint, NULL);
+			      PVRSRVBridgeRGXDisableBreakpoint, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_RGXDISABLEBREAKPOINT),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXDISABLEBREAKPOINT));
 
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXBREAKPOINT,
 			      PVRSRV_BRIDGE_RGXBREAKPOINT_RGXOVERALLOCATEBPREGISTERS,
-			      PVRSRVBridgeRGXOverallocateBPRegisters, NULL);
+			      PVRSRVBridgeRGXOverallocateBPRegisters, NULL,
+			      sizeof(PVRSRV_BRIDGE_IN_RGXOVERALLOCATEBPREGISTERS),
+			      sizeof(PVRSRV_BRIDGE_OUT_RGXOVERALLOCATEBPREGISTERS));
 
 	return PVRSRV_OK;
 }

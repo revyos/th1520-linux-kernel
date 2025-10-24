@@ -47,8 +47,11 @@
 #include <linux/slab.h>
 
 #include "pvr_fence.h"
+#include "pvr_sw_fence.h"
 #include "services_kernel_client.h"
 #include "sync_checkpoint_external.h"
+#include "osfunc_common.h"
+#include "pvr_debug.h"
 
 #define CREATE_TRACE_POINTS
 #include "pvr_fence_trace.h"
@@ -60,9 +63,6 @@
 static struct kmem_cache *pvr_fence_cache;
 static DEFINE_MUTEX(pvr_fence_cache_mutex);
 static u32 pvr_fence_cache_refcount;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-struct workqueue_struct *gpFenceDestroyWq;
-#endif
 
 #define PVR_DUMPDEBUG_LOG(pfnDumpDebugPrintf, pvDumpDebugFile, fmt, ...) \
 	do {                                                             \
@@ -138,8 +138,45 @@ pvr_fence_context_fences_dump(struct pvr_fence_context *fctx,
 		PVR_DUMPDEBUG_LOG(pfnDumpDebugPrintf, pvDumpDebugFile,
 				  " @%s", value);
 
-		if (is_pvr_fence(fence))
+		if (is_pvr_fence(fence)) {
+#ifdef PVR_FENCE_DEBUG
+			/* Check to see if we have any mirrored fences hanging off our
+			 * context. If so, show them.
+			 */
+			if (!list_empty(&pvr_fence->mirror_list_node)) {
+				struct pvr_fence *this_pvr_fence;
+
+				PVR_FENCE_TRACE(&pvr_fence->base, "%s: %s: MIRRORED PRESENT",
+						__func__, pvr_fence->name);
+
+				/* Scan the list and show what fence values / devices etc
+				 * are present and referencing this fence-context
+				 */
+				list_for_each_entry(this_pvr_fence, &pvr_fence->mirror_list_node, mirror_list_node)
+				{
+					u32 int_dev_id = ~0U;
+					s32 kern_dev_id = -1;
+
+					/* Find the original fence which is being mirrored. */
+					if (this_pvr_fence->type != PVR_FENCE_TYPE_PROXY_MIRROR) {
+						const u32 fence_ufo_addr =
+						    SyncCheckpointGetFirmwareAddr(this_pvr_fence->sync_checkpoint);
+
+						(void) SyncCheckpointGetDevIDs(this_pvr_fence->sync_checkpoint,
+						                               &kern_dev_id, &int_dev_id);
+
+						PVR_FENCE_TRACE(&this_pvr_fence->base,
+								"%s: %s: FWAddr:0x%x: (Device %u)",
+								__func__, this_pvr_fence->name,
+								PVRSRV_UFO_GET_FWADDR(fence_ufo_addr),
+								int_dev_id);
+					}
+				}
+			}
+#endif /* PVR_FENCE_DEBUG */
+
 			continue;
+		}
 
 		if (fence->ops->timeline_value_str) {
 			fence->ops->timeline_value_str(fence, value,
@@ -160,7 +197,7 @@ pvr_fence_context_fences_dump(struct pvr_fence_context *fctx,
 		}
 
 		PVR_DUMPDEBUG_LOG(pfnDumpDebugPrintf, pvDumpDebugFile,
-				  " |  @%s (foreign)", value);
+				  " |  @%s (foreign)", fence_value_str);
 	}
 	spin_unlock_irqrestore(&fctx->list_lock, flags);
 }
@@ -194,12 +231,25 @@ pvr_fence_sched_free(struct rcu_head *rcu)
 	kmem_cache_free(pvr_fence_cache, pvr_fence);
 }
 
+static inline bool pvr_fence_is_proxy(struct pvr_fence *fence)
+{
+	if (fence->type == PVR_FENCE_TYPE_PROXY_FOREIGN ||
+	    fence->type == PVR_FENCE_TYPE_PROXY_MIRROR ||
+	    fence->type == PVR_FENCE_TYPE_PROXY_SW) {
+		return true;
+	}
+
+	return false;
+}
+
 static inline void
 pvr_fence_context_free_deferred(struct pvr_fence_context *fctx)
 {
 	struct pvr_fence *pvr_fence, *tmp;
-	LIST_HEAD(deferred_free_list);
+	struct list_head deferred_free_list;
 	unsigned long flags;
+
+	INIT_LIST_HEAD(&deferred_free_list);
 
 	spin_lock_irqsave(&fctx->list_lock, flags);
 	list_for_each_entry_safe(pvr_fence, tmp,
@@ -212,6 +262,11 @@ pvr_fence_context_free_deferred(struct pvr_fence_context *fctx)
 				 &deferred_free_list,
 				 fence_head) {
 		list_del(&pvr_fence->fence_head);
+
+		if (pvr_fence_is_proxy(pvr_fence)) {
+			dma_fence_put(pvr_fence->fence);
+		}
+
 		SyncCheckpointFree(pvr_fence->sync_checkpoint);
 		call_rcu(&pvr_fence->rcu, pvr_fence_sched_free);
 		module_put(THIS_MODULE);
@@ -235,8 +290,9 @@ pvr_fence_context_signal_fences(void *data)
 	struct pvr_fence_context *fctx = (struct pvr_fence_context *)data;
 	struct pvr_fence *pvr_fence, *tmp;
 	unsigned long flags1;
+	struct list_head signal_list;
 
-	LIST_HEAD(signal_list);
+	INIT_LIST_HEAD(&signal_list);
 
 	/*
 	 * We can't call fence_signal while holding the lock as we can end up
@@ -257,9 +313,18 @@ pvr_fence_context_signal_fences(void *data)
 	spin_unlock_irqrestore(&fctx->list_lock, flags1);
 
 	list_for_each_entry_safe(pvr_fence, tmp, &signal_list, signal_head) {
+#ifdef PVR_FENCE_DEBUG
+		u32 int_dev_id;
+		s32 kern_dev_id;
 
-		PVR_FENCE_TRACE(&pvr_fence->base, "signalled fence (%s)\n",
-				pvr_fence->name);
+		(void) SyncCheckpointGetDevIDs(pvr_fence->sync_checkpoint,
+					       &kern_dev_id, &int_dev_id);
+
+		PVR_FENCE_TRACE(&pvr_fence->base,
+		       "signalled fence (%s) Device [%u/%d]\n",
+				pvr_fence->name, int_dev_id, kern_dev_id);
+#endif /* PVR_FENCE_DEBUG */
+
 		trace_pvr_fence_signal_fence(pvr_fence);
 		spin_lock_irqsave(&pvr_fence->fctx->list_lock, flags1);
 		list_del(&pvr_fence->signal_head);
@@ -291,7 +356,7 @@ pvr_fence_context_destroy_internal(struct pvr_fence_context *fctx)
 
 	PVRSRVUnregisterCmdCompleteNotify(fctx->cmd_complete_handle);
 
-	// wait for all fences to be freed before kmem_cache_destroy() is called
+	/* wait for all fences to be freed before kmem_cache_destroy() is called */
 	rcu_barrier();
 
 	/* Destroy pvr_fence object cache, if no one is using it */
@@ -365,7 +430,7 @@ pvr_fence_context_create_internal(struct workqueue_struct *fence_status_wq,
 	fctx->fence_wq = fence_status_wq;
 
 	fctx->fence_context = dma_fence_context_alloc(1);
-	strlcpy(fctx->name, name, sizeof(fctx->name));
+	OSStringSafeCopy(fctx->name, name, sizeof(fctx->name));
 
 	srv_err = PVRSRVRegisterCmdCompleteNotify(&fctx->cmd_complete_handle,
 				pvr_fence_context_signal_fences,
@@ -483,6 +548,8 @@ pvr_fence_context_create(void *dev_cookie,
 		goto err_out;
 	}
 
+	fctx->dev_cookie = dev_cookie;
+
 	eError = pvr_fence_context_register_dbg(&fctx->dbg_request_handle,
 					dev_cookie,
 					fctx);
@@ -491,6 +558,10 @@ pvr_fence_context_create(void *dev_cookie,
 		       __func__, PVRSRVGetErrorString(eError));
 		goto err_destroy_ctx;
 	}
+
+	PVR_FENCE_CTX_TRACE(fctx,
+						"%s: Created fence context (%s)[%p], dev_cookie %p\n",
+						__func__, fctx->name, fctx, dev_cookie);
 
 	return fctx;
 
@@ -509,18 +580,7 @@ static void pvr_fence_context_destroy_kref(struct kref *kref)
 
 	trace_pvr_fence_context_destroy_kref(fctx);
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-	if (!gpFenceDestroyWq) {
-		gpFenceDestroyWq = create_freezable_workqueue("pvr_fence_destroy");
-		if (!gpFenceDestroyWq) {
-			pr_err("%s: Failed to create fence destroy workqueue", __func__);
-			return;
-		}
-	}
-	queue_work(gpFenceDestroyWq, &fctx->destroy_work);
-#else
-	schedule_work(&fctx->destroy_work);
-#endif
+	queue_work(NativeSyncGetFenceCtxDestroyWq(), &fctx->destroy_work);
 }
 
 /**
@@ -570,8 +630,8 @@ void pvr_fence_fence_value_str(struct dma_fence *fence, char *str, int size)
 		 test_bit(DMA_FENCE_FLAG_SIGNALED_BIT,
 			  &pvr_fence->fence->flags) ? "+" : "-",
 		 refcount_read(&pvr_fence->fence->refcount.refcount),
-		 SyncCheckpointGetFirmwareAddr(
-			 pvr_fence->sync_checkpoint),
+		 PVRSRV_UFO_GET_FWADDR(SyncCheckpointGetFirmwareAddr(
+			 pvr_fence->sync_checkpoint)),
 		 SyncCheckpointGetEnqueuedCount(pvr_fence->sync_checkpoint),
 		 SyncCheckpointGetStateString(pvr_fence->sync_checkpoint),
 		 pvr_fence->name,
@@ -648,7 +708,7 @@ pvr_fence_release(struct dma_fence *fence)
 	}
 }
 
-const struct dma_fence_ops pvr_fence_ops = {
+static const struct dma_fence_ops pvr_fence_ops = {
 	.get_driver_name = pvr_fence_get_driver_name,
 	.get_timeline_name = pvr_fence_get_timeline_name,
 	.fence_value_str = pvr_fence_fence_value_str,
@@ -701,6 +761,8 @@ pvr_fence_create(struct pvr_fence_context *fctx,
 
 	INIT_LIST_HEAD(&pvr_fence->fence_head);
 	INIT_LIST_HEAD(&pvr_fence->signal_head);
+	INIT_LIST_HEAD(&pvr_fence->mirror_list_node);
+	pvr_fence->type = PVR_FENCE_TYPE_RGX;
 	pvr_fence->fctx = fctx;
 	seqno = pvr_fence_context_seqno_next(fctx);
 	/* Add the seqno to the fence name for easier debugging */
@@ -771,7 +833,7 @@ void pvr_fence_foreign_fence_value_str(struct dma_fence *fence, char *str,
 		 test_bit(DMA_FENCE_FLAG_SIGNALED_BIT,
 			  &pvr_fence->fence->flags) ? "+" : "-",
 		 refcount_read(&fence->refcount.refcount),
-		 sync_addr,
+		 PVRSRV_UFO_GET_FWADDR(sync_addr),
 		 pvr_fence_sync_value(pvr_fence),
 		 sync_value_next,
 		 pvr_fence->name);
@@ -809,27 +871,26 @@ pvr_fence_foreign_release(struct dma_fence *fence)
 
 	if (pvr_fence) {
 		struct pvr_fence_context *fctx = pvr_fence->fctx;
-		struct dma_fence *foreign_fence = pvr_fence->fence;
 
 		PVR_FENCE_TRACE(&pvr_fence->base,
 				"released fence for foreign fence %llu#%d (%s)\n",
 				(u64) pvr_fence->fence->context,
-				pvr_fence->fence->seqno, pvr_fence->name);
+				(int)pvr_fence->fence->seqno, pvr_fence->name);
 		trace_pvr_fence_foreign_release(pvr_fence);
 
 		spin_lock_irqsave(&fctx->list_lock, flags);
+		/* Move the fence to the deferred list where dma_fence_put will be
+		 * called on the foreign fence. */
 		list_move(&pvr_fence->fence_head,
 			  &fctx->deferred_free_list);
 		spin_unlock_irqrestore(&fctx->list_lock, flags);
-
-		dma_fence_put(foreign_fence);
 
 		kref_put(&fctx->kref,
 			 pvr_fence_context_destroy_kref);
 	}
 }
 
-const struct dma_fence_ops pvr_fence_foreign_ops = {
+static const struct dma_fence_ops pvr_fence_foreign_ops = {
 	.get_driver_name = pvr_fence_foreign_get_driver_name,
 	.get_timeline_name = pvr_fence_foreign_get_timeline_name,
 	.fence_value_str = pvr_fence_foreign_fence_value_str,
@@ -839,13 +900,25 @@ const struct dma_fence_ops pvr_fence_foreign_ops = {
 	.release = pvr_fence_foreign_release,
 };
 
+bool is_pvr_fence(struct dma_fence *fence)
+{
+	return ((fence->ops == &pvr_fence_ops) ||
+			(fence->ops == &pvr_fence_foreign_ops));
+}
+
+struct pvr_fence *to_pvr_fence(struct dma_fence *fence)
+{
+	if (is_pvr_fence(fence))
+		return container_of(fence, struct pvr_fence, base);
+
+	return NULL;
+}
+
 static void
 pvr_fence_foreign_signal_sync(struct dma_fence *fence, struct dma_fence_cb *cb)
 {
 	struct pvr_fence *pvr_fence = container_of(cb, struct pvr_fence, cb);
 	struct pvr_fence_context *fctx = pvr_fence->fctx;
-
-	WARN_ON_ONCE(is_pvr_fence(fence));
 
 	/* Callback registered by dma_fence_add_callback can be called from an atomic ctx */
 	pvr_fence_sync_signal(pvr_fence, PVRSRV_FENCE_FLAG_CTX_ATOMIC);
@@ -857,7 +930,7 @@ pvr_fence_foreign_signal_sync(struct dma_fence *fence, struct dma_fence_cb *cb)
 	PVR_FENCE_TRACE(&pvr_fence->base,
 			"foreign fence %llu#%d signalled (%s)\n",
 			(u64) pvr_fence->fence->context,
-			pvr_fence->fence->seqno, pvr_fence->name);
+			(int)pvr_fence->fence->seqno, pvr_fence->name);
 
 	/* Drop the reference on the base fence */
 	dma_fence_put(&pvr_fence->base);
@@ -891,20 +964,52 @@ pvr_fence_create_from_fence(struct pvr_fence_context *fctx,
 			    PVRSRV_FENCE fence_fd,
 			    const char *name)
 {
-	struct pvr_fence *pvr_fence = to_pvr_fence(fence);
+	struct pvr_fence *orig_pvr_fence = to_pvr_fence(fence);
+	struct pvr_fence *proxy_fence;
 	unsigned int seqno;
 	unsigned long flags;
 	PVRSRV_ERROR srv_err;
 	int err;
+	char tmp_str[32] = ""; /* mirrors PVRSRV_SYNC_NAME_LENGTH value */
+	u32 int_dev_id = ~0U;
+	s32 kern_dev_id = -1;
+	pvr_fence_type proxy_type = PVR_FENCE_TYPE_PROXY_FOREIGN;
 
-	if (pvr_fence) {
-		if (WARN_ON(fence->ops == &pvr_fence_foreign_ops))
-			return NULL;
-		dma_fence_get(fence);
+	PVR_FENCE_TRACE(fence, "%s: fence @%p, orig_pvr_fence = %p fctx = %p, dev %p\n",
+			__func__, fence, orig_pvr_fence, fctx, (fctx ? fctx->dev_cookie : NULL));
 
-		PVR_FENCE_TRACE(fence, "created fence from PVR fence (%s)\n",
-				name);
-		return pvr_fence;
+	if (orig_pvr_fence) {
+		if ((SyncCheckpointCommonDeviceIDs(sync_checkpoint_ctx,
+						orig_pvr_fence->fctx->dev_cookie)) ||
+		(fctx->dev_cookie == orig_pvr_fence->fctx->dev_cookie)) {
+			if (WARN_ON(fence->ops == &pvr_fence_foreign_ops))
+				return NULL;
+			dma_fence_get(fence);
+
+			PVR_FENCE_TRACE(fence, "created fence from PVR fence (%s)\n",
+					name);
+			return orig_pvr_fence;
+		} else {
+			int ret;
+			const u32 fence_ufo_addr =
+				SyncCheckpointGetFirmwareAddr(orig_pvr_fence->sync_checkpoint);
+
+			(void) SyncCheckpointGetDevIDs(orig_pvr_fence->sync_checkpoint,
+			                               &kern_dev_id, &int_dev_id);
+
+			ret = snprintf(tmp_str, sizeof(tmp_str), "Dev = %u, FWAddr = 0x%x",
+			               int_dev_id, fence_ufo_addr);
+			WARN_ON(ret >= sizeof(tmp_str));
+
+			proxy_type = PVR_FENCE_TYPE_PROXY_MIRROR;
+
+#if defined(PVR_FENCE_DEBUG)
+			(void) SyncCheckpointGetDevIDs(orig_pvr_fence->sync_checkpoint,
+						       &kern_dev_id, &int_dev_id);
+			PVR_FENCE_TRACE(fence, "MIRRORED FENCE '%s' Device [%u/%d]", tmp_str,
+					int_dev_id, kern_dev_id);
+#endif /* defined(PVR_FENCE_DEBUG) */
+		}
 	}
 
 	if (!try_module_get(THIS_MODULE))
@@ -914,50 +1019,110 @@ pvr_fence_create_from_fence(struct pvr_fence_context *fctx,
 	 * make sure that all members of pvr_fence struct are initialized
 	 * here
 	 */
-	pvr_fence = kmem_cache_alloc(pvr_fence_cache, GFP_KERNEL);
-	if (!pvr_fence)
+	proxy_fence = kmem_cache_alloc(pvr_fence_cache, GFP_KERNEL);
+	if (!proxy_fence) {
+		pr_err("%s: kmem_cache_alloc() failed",
+			   __func__);
 		goto err_module_put;
+	}
 
-	srv_err = SyncCheckpointAlloc(sync_checkpoint_ctx,
-					  SYNC_CHECKPOINT_FOREIGN_CHECKPOINT,
-					  fence_fd,
-					  name, &pvr_fence->sync_checkpoint);
-	if (srv_err != PVRSRV_OK)
-		goto err_free_pvr_fence;
+	if (proxy_type == PVR_FENCE_TYPE_PROXY_MIRROR) {
+		srv_err = SyncCheckpointAlloc(sync_checkpoint_ctx,
+					      SYNC_CHECKPOINT_MIRRORED_CHECKPOINT,
+					      fence_fd,
+					      tmp_str,
+					      &proxy_fence->sync_checkpoint);
+		if (srv_err != PVRSRV_OK) {
+			pr_err("%s: SyncCheckpointAlloc() failed (srv_err=%d)",
+					__func__, srv_err);
+			goto err_free_pvr_fence;
+		}
+	} else {
+		IMG_BOOL is_sw_fence = IMG_FALSE;
 
-	INIT_LIST_HEAD(&pvr_fence->fence_head);
-	INIT_LIST_HEAD(&pvr_fence->signal_head);
-	pvr_fence->fctx = fctx;
-	pvr_fence->fence = dma_fence_get(fence);
+		if (is_pvr_sw_fence(fence)) {
+			is_sw_fence = IMG_TRUE;
+			proxy_type = PVR_FENCE_TYPE_PROXY_SW;
+		}
+
+		srv_err = SyncCheckpointAllocProxy(sync_checkpoint_ctx,
+						     fence_fd,
+						     fence,
+						     is_sw_fence,
+						     name,
+						     &proxy_fence->sync_checkpoint);
+		if (srv_err != PVRSRV_OK) {
+			pr_err("%s: SyncCheckpointAllocForeign() failed (srv_err=%d)",
+					__func__, srv_err);
+			goto err_free_pvr_fence;
+		}
+	}
+
+	INIT_LIST_HEAD(&proxy_fence->fence_head);
+	INIT_LIST_HEAD(&proxy_fence->signal_head);
+	INIT_LIST_HEAD(&proxy_fence->mirror_list_node);
+	proxy_fence->type = proxy_type;
+	proxy_fence->fctx = fctx;
+	proxy_fence->fence = dma_fence_get(fence);
 	seqno = pvr_fence_context_seqno_next(fctx);
 	/* Add the seqno to the fence name for easier debugging */
-	pvr_fence_prepare_name(pvr_fence->name, sizeof(pvr_fence->name),
+	pvr_fence_prepare_name(proxy_fence->name, sizeof(proxy_fence->name),
 			name, seqno);
 
 	/*
 	 * We use the base fence to refcount the PVR fence and to do the
 	 * necessary clean up once the refcount drops to 0.
 	 */
-	dma_fence_init(&pvr_fence->base, &pvr_fence_foreign_ops, &fctx->lock,
+	dma_fence_init(&proxy_fence->base, &pvr_fence_foreign_ops, &fctx->lock,
 		       fctx->fence_context, seqno);
 
 	/*
 	 * Take an extra reference on the base fence that gets dropped when the
 	 * foreign fence is signalled.
 	 */
-	dma_fence_get(&pvr_fence->base);
+	dma_fence_get(&proxy_fence->base);
 
 	spin_lock_irqsave(&fctx->list_lock, flags);
-	list_add_tail(&pvr_fence->fence_head, &fctx->fence_list);
+	list_add_tail(&proxy_fence->fence_head, &fctx->fence_list);
+	/* Add the new pvr_fence to the underlying original 'mirrored' fence.
+	 */
+	if (proxy_fence->type == PVR_FENCE_TYPE_PROXY_MIRROR) {
+#ifdef PVR_FENCE_DEBUG
+		s32 new_kern_dev_id, old_kern_dev_id;
+		u32 new_int_dev_id, old_kern_dev_id;
+#endif /* PVR_FENCE_DEBUG */
+
+		/* Add a cross-SyncCheckpoint reference from the new 'pvr_fence' to
+		 * the mirrored one (to_pvr_fence(fence) from the original params.
+		 */
+		list_add_tail(&orig_pvr_fence->mirror_list_node,
+			      &proxy_fence->mirror_list_node);
+
+#ifdef PVR_FENCE_DEBUG
+		(void) SyncCheckpointGetDevIDs(proxy_fence->sync_checkpoint,
+					       &new_kern_dev_id, &new_int_dev_id);
+		(void) SyncCheckpointGetDevIDs(orig_pvr_fence->sync_checkpoint,
+					       &old_kern_dev_id, &old_kern_dev_id);
+
+		PVR_FENCE_TRACE(&proxy_fence->base,
+				"Adding mirror_list %p [%u/%d] to %p [%u/%d]",
+				&proxy_fence->mirror_list_node,
+				new_int_dev_id, new_kern_dev_id,
+				&orig_pvr_fence->mirror_list_node,
+				old_kern_dev_id, old_kern_dev_id);
+#endif /* PVR_FENCE_DEBUG */
+	}
+
 	spin_unlock_irqrestore(&fctx->list_lock, flags);
 	kref_get(&fctx->kref);
 
-	PVR_FENCE_TRACE(&pvr_fence->base,
-			"created fence from foreign fence %llu#%d (%s)\n",
-			(u64) pvr_fence->fence->context,
-			pvr_fence->fence->seqno, name);
+	PVR_FENCE_TRACE(&proxy_fence->base,
+			"created fence from %s fence %llu#%d (%s)\n",
+			proxy_fence->type == PVR_FENCE_TYPE_PROXY_MIRROR ? "mirror" : "foreign",
+			(u64) proxy_fence->fence->context,
+			(int)proxy_fence->fence->seqno, name);
 
-	err = dma_fence_add_callback(fence, &pvr_fence->cb,
+	err = dma_fence_add_callback(fence, &proxy_fence->cb,
 				     pvr_fence_foreign_signal_sync);
 	if (err) {
 		if (err != -ENOENT) {
@@ -966,33 +1131,40 @@ pvr_fence_create_from_fence(struct pvr_fence_context *fctx,
 			goto err_put_ref;
 		}
 
+
 		/*
 		 * The fence has already signalled so set the sync as signalled.
 		 * The "signalled" hwperf packet should be emitted because the
 		 * callback won't be called for already signalled fence hence,
 		 * PVRSRV_FENCE_FLAG_NONE flag.
 		 */
-		pvr_fence_sync_signal(pvr_fence, PVRSRV_FENCE_FLAG_NONE);
-		PVR_FENCE_TRACE(&pvr_fence->base,
+		pvr_fence_sync_signal(proxy_fence, PVRSRV_FENCE_FLAG_NONE);
+		PVR_FENCE_TRACE(&proxy_fence->base,
 				"foreign fence %llu#%d already signaled (%s)\n",
-				(u64) pvr_fence->fence->context,
-				pvr_fence->fence->seqno,
+				(u64) proxy_fence->fence->context,
+				(int)proxy_fence->fence->seqno,
 				name);
-		dma_fence_put(&pvr_fence->base);
+		dma_fence_put(&proxy_fence->base);
 	}
 
-	trace_pvr_fence_foreign_create(pvr_fence);
+	PVR_ASSERT(pvr_fence_is_proxy(proxy_fence) == true);
+	PVR_ASSERT(proxy_fence->base.ops == &pvr_fence_foreign_ops);
 
-	return pvr_fence;
+	trace_pvr_fence_foreign_create(proxy_fence);
+
+	return proxy_fence;
 
 err_put_ref:
 	kref_put(&fctx->kref, pvr_fence_context_destroy_kref);
 	spin_lock_irqsave(&fctx->list_lock, flags);
-	list_del(&pvr_fence->fence_head);
+	list_del(&proxy_fence->fence_head);
+	if (proxy_fence->type == PVR_FENCE_TYPE_PROXY_MIRROR)
+		list_del(&proxy_fence->mirror_list_node);
+
 	spin_unlock_irqrestore(&fctx->list_lock, flags);
-	SyncCheckpointFree(pvr_fence->sync_checkpoint);
+	SyncCheckpointFree(proxy_fence->sync_checkpoint);
 err_free_pvr_fence:
-	kmem_cache_free(pvr_fence_cache, pvr_fence);
+	kmem_cache_free(pvr_fence_cache, proxy_fence);
 err_module_put:
 	module_put(THIS_MODULE);
 err_exit:
@@ -1092,6 +1264,13 @@ pvr_fence_get_checkpoint(struct pvr_fence *update_fence)
 	return update_fence->sync_checkpoint;
 }
 
+struct SYNC_CHECKPOINT_TAG *
+pvr_fence_get_and_ref_checkpoint(struct pvr_fence *update_fence)
+{
+	SyncCheckpointTakeRef(update_fence->sync_checkpoint);
+	return update_fence->sync_checkpoint;
+}
+
 /**
  * pvr_fence_dump_info_on_stalled_ufos - displays debug
  * information on a native fence associated with any of
@@ -1099,6 +1278,7 @@ pvr_fence_get_checkpoint(struct pvr_fence *update_fence)
  * pvr_sync_file.c if the driver determines any GPU work
  * is stuck waiting for a sync checkpoint representing a
  * foreign sync to be signalled.
+ * @fctx:    fence context
  * @nr_ufos: number of ufos in vaddrs
  * @vaddrs:  array of FW addresses of UFOs which the
  *           driver is waiting on.
@@ -1135,9 +1315,9 @@ u32 pvr_fence_dump_info_on_stalled_ufos(struct pvr_fence_context *fctx,
 
 			/* Dump sync info */
 			PVR_DUMPDEBUG_LOG(pfnDummy, NULL,
-					  "\tSyncID = %d, FWAddr = 0x%08x: TLID = %d (Foreign Fence - [%p] %s)",
+					  "\tSyncID = %d, FWAddr = 0x%08x: TLID = %d (Foreign Fence - ["IMG_KM_PTR_FMTSPEC"] %s)",
 					  SyncCheckpointGetId(checkpoint),
-					  fence_ufo_addr,
+					  PVRSRV_UFO_GET_FWADDR(fence_ufo_addr),
 					  SyncCheckpointGetTimeline(checkpoint),
 					  pvr_fence->fence,
 					  pvr_fence->name);

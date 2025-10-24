@@ -48,6 +48,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "device.h"
 #include "mmu_common.h"
 #include "rgxdevice.h"
+#include "opaque_types.h"
 
 #define RGXMEM_SERVER_MMU_CONTEXT_MAX_NAME 16
 
@@ -66,6 +67,43 @@ typedef struct _RGXMEM_PROCESS_INFO_
 
 typedef struct SERVER_MMU_CONTEXT_TAG SERVER_MMU_CONTEXT;
 
+/*************************************************************************/ /*!
+@Function       RGXServerMMUContextRef
+
+@Description    Increments the reference count on the SERVER_MMU_CONTEXT by one.
+
+                Use this function to prevent the SERVER_MMU_CONTEXT being freed
+                until RGXServerMMUContextUnref is called.
+
+                You should call this function if:
+                 1. You are making use of the SERVER_MMU_CONTEXT and this function
+                    hasn't been called previously in the callstack.
+                 2. You are setting pointer to a SERVER_MMU_CONTEXT into another
+                    object.
+
+                RGXServerMMUContextUnref must be called once the object is no
+                longer going to be read or written to in the current callstack.
+
+@Input          psServerMMUContext  The SERVER_MMU_CONTEXT to be reference counted.
+
+@Return         PVRSRV_ERROR
+*/ /**************************************************************************/
+PVRSRV_ERROR RGXServerMMUContextRef(SERVER_MMU_CONTEXT *psServerMMUContext);
+
+/*************************************************************************/ /*!
+@Function       RGXServerMMUContextUnref
+
+@Description    Decreases the reference count on the SERVER_MMU_CONTEXT by one.
+
+                This should be always called after RGXServerMMUContextRef, once
+                the SERVER_MMU_CONTEXT is no longer being read from or written to.
+
+@Input          psServerMMUContext  The SERVER_MMU_CONTEXT to be reference counted.
+
+@Return         PVRSRV_ERROR
+*/ /**************************************************************************/
+void RGXServerMMUContextUnref(SERVER_MMU_CONTEXT *psServerMMUContext);
+
 IMG_DEV_PHYADDR GetPC(MMU_CONTEXT * psContext);
 
 void RGXSetFWMemContextDevVirtAddr(SERVER_MMU_CONTEXT *psServerMMUContext,
@@ -73,12 +111,6 @@ void RGXSetFWMemContextDevVirtAddr(SERVER_MMU_CONTEXT *psServerMMUContext,
 
 void RGXMMUSyncPrimAlloc(PVRSRV_DEVICE_NODE *psDevNode);
 void RGXMMUSyncPrimFree(void);
-
-PVRSRV_ERROR RGXSLCFlushRange(PVRSRV_DEVICE_NODE *psDevNode,
-							  MMU_CONTEXT *psMMUContext,
-							  IMG_DEV_VIRTADDR sDevVAddr,
-							  IMG_DEVMEM_SIZE_T uiLength,
-							  IMG_BOOL bInvalidate);
 
 PVRSRV_ERROR RGXInvalidateFBSCTable(PVRSRV_DEVICE_NODE *psDeviceNode,
 									MMU_CONTEXT *psMMUContext,
@@ -108,6 +140,18 @@ PVRSRV_ERROR RGXMMUCacheInvalidateKick(PVRSRV_DEVICE_NODE *psDevNode,
                                        IMG_UINT32 *pui32NextMMUInvalidateUpdate);
 
 /*************************************************************************/ /*!
+@Function       RGXMMUCacheInvalidateKickAndWait
+
+@Description    Sends a flush command to a particular DM but first takes
+                the power lock. Blocks unit the command finishes.
+
+@Input          psDevNode   Device Node pointer
+
+@Return			PVRSRV_ERROR
+*/ /**************************************************************************/
+PVRSRV_ERROR RGXMMUCacheInvalidateKickAndWait(PVRSRV_DEVICE_NODE *psDevNode);
+
+/*************************************************************************/ /*!
 @Function       RGXPreKickCacheCommand
 
 @Description    Sends a cache flush command to a particular DM without
@@ -124,12 +168,60 @@ PVRSRV_ERROR RGXPreKickCacheCommand(PVRSRV_RGXDEV_INFO *psDevInfo,
 									RGXFWIF_DM eDM,
 									IMG_UINT32 *pui32MMUInvalidateUpdate);
 
+/* Needed for Volcanic architectures with BRN71422 */
+#if defined(RGX_BRN71422_TARGET_HARDWARE_PHYSICAL_ADDR)
+void RGXMapBRN71422TargetPhysicalAddress(struct _CONNECTION_DATA_ *psConnection,
+		                                 struct _PVRSRV_DEVICE_NODE_ *psDevNode,
+		                                 IMG_DEV_PHYADDR sPhysAddrL1Px,
+		                                 void *pxL1PxCpuVAddr);
+#endif
+
+/* Needed for Rogue architecture where a MIPS FW CPU is used */
+#if defined(RGX_FEATURE_MIPS_BIT_MASK)
+void RGXMMUTweakProtFlags(struct _PVRSRV_DEVICE_NODE_ *psDevNode,
+		                  MMU_DEVICEATTRIBS *psDevAttrs,
+		                  PVRSRV_MEMALLOCFLAGS_T uiMappingFlags,
+		                  MMU_PROTFLAGS_T *uiMMUProtFlags);
+#endif
+
 void RGXUnregisterMemoryContext(IMG_HANDLE hPrivData);
-PVRSRV_ERROR RGXRegisterMemoryContext(PVRSRV_DEVICE_NODE	*psDevNode,
-									  MMU_CONTEXT			*psMMUContext,
-									  IMG_HANDLE			*hPrivData);
+PVRSRV_ERROR RGXRegisterMemoryContext(PVRSRV_DEVICE_NODE *psDevNode,
+									  MMU_CONTEXT *psMMUContext,
+									  DEVMEMINT_CTX *psDevMemCtx,
+									  IMG_HANDLE *hPrivData);
 
 DEVMEM_MEMDESC *RGXGetFWMemDescFromMemoryContextHandle(IMG_HANDLE hPriv);
+
+/*************************************************************************/ /*!
+@Function       RGXValidateAddressPermissions
+
+@Description    Check if the given virtual address is valid for the given
+                device specific memory allocation flags.
+                See rgx_memallocflags.h.
+
+@Input          psDevNode    Device Node pointer
+@Input          psMMUContext MMU context pointer
+@Input          sVDevAddr    Device virtual address.
+@Input          uiFlags      Memory allocation flags.
+
+@Return         IMG_TRUE if the address is valid, IMG_FALSE otherwise.
+*/ /**************************************************************************/
+IMG_BOOL RGXValidateAddressPermissions(PVRSRV_DEVICE_NODE *psDevNode,
+                                       MMU_CONTEXT *psMMUContext,
+                                       IMG_DEV_VIRTADDR sVDevAddr,
+                                       PVRSRV_MEMALLOCFLAGS_T uiFlags);
+
+/*************************************************************************/ /*!
+@Function       RGXValidateExportableFlags
+
+@Description    Checks if a memory resource with the given flags can be exported
+                out of the driver and/or process.
+
+@Input          uiFlags      Memory allocation flags.
+
+@Return         IMG_TRUE if export is allowed, IMG_FALSE otherwise.
+*/ /**************************************************************************/
+IMG_BOOL RGXValidateExportableFlags(PVRSRV_MEMALLOCFLAGS_T uiFlags);
 
 void RGXCheckFaultAddress(PVRSRV_RGXDEV_INFO *psDevInfo,
 				IMG_DEV_VIRTADDR *psDevVAddr,

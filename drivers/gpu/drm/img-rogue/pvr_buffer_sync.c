@@ -77,13 +77,7 @@ struct pvr_buffer_sync_append_data {
 static struct dma_resv *
 pmr_reservation_object_get(struct _PMR_ *pmr)
 {
-	struct dma_buf *dmabuf;
-
-	dmabuf = PhysmemGetDmaBuf(pmr);
-	if (dmabuf)
-		return dmabuf->resv;
-
-	return NULL;
+	return PhysmemGetDmaResv(pmr);
 }
 
 static int
@@ -172,43 +166,58 @@ pvr_buffer_sync_pmrs_unlock(struct pvr_buffer_sync_context *ctx,
 	mutex_unlock(&ctx->ctx_lock);
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)) || \
+	((LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)) && defined(CHROMIUMOS_KERNEL))
+
+static void
+dma_resv_count_fences(struct dma_resv *resv, u32 *read_fence_count_out, u32 *write_fence_count_out)
+{
+	struct dma_resv_iter cursor;
+	u32 write_fence_count = 0;
+	u32 read_fence_count = 0;
+	struct dma_fence *fence;
+
+	dma_resv_iter_begin(&cursor, resv, DMA_RESV_USAGE_READ);
+	dma_resv_for_each_fence_unlocked(&cursor, fence) {
+		if (dma_resv_iter_is_restarted(&cursor)) {
+			read_fence_count = 0;
+			write_fence_count = 0;
+		}
+		if (dma_resv_iter_usage(&cursor) == DMA_RESV_USAGE_READ)
+			read_fence_count++;
+		else if (dma_resv_iter_usage(&cursor) == DMA_RESV_USAGE_WRITE)
+			write_fence_count++;
+	}
+
+	*read_fence_count_out = read_fence_count;
+	*write_fence_count_out = write_fence_count;
+}
+
 static u32
 pvr_buffer_sync_pmrs_fence_count(u32 nr_pmrs, struct _PMR_ **pmrs,
 				 u32 *pmr_flags)
 {
 	struct dma_resv *resv;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-	struct dma_resv_iter cursor;
-#else
-	struct dma_resv_list *resv_list;
-#endif
-	struct dma_fence *fence;
 	u32 fence_count = 0;
 	bool exclusive;
 	int i;
 
 	for (i = 0; i < nr_pmrs; i++) {
+		u32 write_fence_count = 0;
+		u32 read_fence_count = 0;
+
 		exclusive = !!(pmr_flags[i] & PVR_BUFFER_FLAG_WRITE);
 
 		resv = pmr_reservation_object_get(pmrs[i]);
 		if (WARN_ON_ONCE(!resv))
 			continue;
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-		dma_resv_for_each_fence(&cursor, resv, DMA_RESV_USAGE_BOOKKEEP, fence) {
-			fence_count++;
-		}
-#else
-		resv_list = dma_resv_shared_list(resv);
-		fence = dma_resv_excl_fence(resv);
+		dma_resv_count_fences(resv, &read_fence_count, &write_fence_count);
 
-		if (fence &&
-		    (!exclusive || !resv_list || !resv_list->shared_count))
-			fence_count++;
-
-		if (exclusive && resv_list)
-			fence_count += resv_list->shared_count;
-#endif
+		if (!exclusive || !read_fence_count)
+			fence_count += write_fence_count;
+		if (exclusive)
+			fence_count += read_fence_count;
 	}
 
 	return fence_count;
@@ -223,16 +232,126 @@ pvr_buffer_sync_check_fences_create(struct pvr_fence_context *fence_ctx,
 {
 	struct pvr_buffer_sync_check_data *data;
 	struct dma_resv *resv;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-	struct dma_resv_iter cursor;
-#else
-	struct dma_resv_list *resv_list;
-	int j;
-#endif
 	struct dma_fence *fence;
 	u32 fence_count;
 	bool exclusive;
 	int i;
+
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return NULL;
+
+	fence_count = pvr_buffer_sync_pmrs_fence_count(nr_pmrs, pmrs,
+						       pmr_flags);
+	if (fence_count) {
+		data->fences = kcalloc(fence_count, sizeof(*data->fences),
+				       GFP_KERNEL);
+		if (!data->fences)
+			goto err_check_data_free;
+	}
+
+	for (i = 0; i < nr_pmrs; i++) {
+		struct dma_resv_iter cursor;
+		bool include_write_fences;
+		bool include_read_fences;
+		u32 write_fence_count = 0;
+		u32 read_fence_count = 0;
+
+		resv = pmr_reservation_object_get(pmrs[i]);
+		if (WARN_ON_ONCE(!resv))
+			continue;
+
+		exclusive = !!(pmr_flags[i] & PVR_BUFFER_FLAG_WRITE);
+
+		dma_resv_count_fences(resv, &read_fence_count, &write_fence_count);
+
+		include_write_fences = (!exclusive || !read_fence_count);
+		include_read_fences = exclusive;
+
+		dma_resv_iter_begin(&cursor, resv, DMA_RESV_USAGE_READ);
+		dma_resv_for_each_fence_unlocked(&cursor, fence) {
+			enum dma_resv_usage usage = dma_resv_iter_usage(&cursor);
+
+			if ((!include_write_fences && usage == DMA_RESV_USAGE_WRITE) ||
+			    (!include_read_fences && usage == DMA_RESV_USAGE_READ))
+				continue;
+
+			data->fences[data->nr_fences++] =
+				pvr_fence_create_from_fence(fence_ctx,
+							    sync_checkpoint_ctx,
+							    fence,
+							    PVRSRV_NO_FENCE,
+							    (usage == DMA_RESV_USAGE_WRITE) ?
+							    "write check fence" :
+							    "read check fence");
+			if (!data->fences[data->nr_fences - 1]) {
+				data->nr_fences--;
+				PVR_FENCE_TRACE(fence,
+						(usage == DMA_RESV_USAGE_WRITE) ?
+						"waiting on write fence" :
+						"waiting on read fence\n");
+				WARN_ON(dma_fence_wait(fence, true) <= 0);
+			}
+		}
+	}
+
+	WARN_ON(i != nr_pmrs);
+
+	return data;
+
+err_check_data_free:
+	kfree(data);
+	return NULL;
+}
+
+#else
+
+static u32
+pvr_buffer_sync_pmrs_fence_count(u32 nr_pmrs, struct _PMR_ **pmrs,
+				 u32 *pmr_flags)
+{
+	struct dma_resv *resv;
+	struct dma_resv_list *resv_list;
+	struct dma_fence *fence;
+	u32 fence_count = 0;
+	bool exclusive;
+	int i;
+
+	for (i = 0; i < nr_pmrs; i++) {
+		exclusive = !!(pmr_flags[i] & PVR_BUFFER_FLAG_WRITE);
+
+		resv = pmr_reservation_object_get(pmrs[i]);
+		if (WARN_ON_ONCE(!resv))
+			continue;
+
+		resv_list = dma_resv_shared_list(resv);
+		fence = dma_resv_excl_fence(resv);
+
+		if (fence &&
+		    (!exclusive || !resv_list || !resv_list->shared_count))
+			fence_count++;
+
+		if (exclusive && resv_list)
+			fence_count += resv_list->shared_count;
+	}
+
+	return fence_count;
+}
+
+static struct pvr_buffer_sync_check_data *
+pvr_buffer_sync_check_fences_create(struct pvr_fence_context *fence_ctx,
+				    PSYNC_CHECKPOINT_CONTEXT sync_checkpoint_ctx,
+				    u32 nr_pmrs,
+				    struct _PMR_ **pmrs,
+				    u32 *pmr_flags)
+{
+	struct pvr_buffer_sync_check_data *data;
+	struct dma_resv *resv;
+	struct dma_resv_list *resv_list;
+	struct dma_fence *fence;
+	u32 fence_count;
+	bool exclusive;
+	int i, j;
 	int err;
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
@@ -253,29 +372,6 @@ pvr_buffer_sync_check_fences_create(struct pvr_fence_context *fence_ctx,
 		if (WARN_ON_ONCE(!resv))
 			continue;
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-		exclusive = !!(pmr_flags[i] & PVR_BUFFER_FLAG_WRITE);
-		if (!exclusive) {
-			err = dma_resv_reserve_fences(resv, 1);
-			if (err)
-				goto err_destroy_fences;
-		}
-
-		dma_resv_for_each_fence(&cursor, resv, DMA_RESV_USAGE_BOOKKEEP, fence) {
-			data->fences[data->nr_fences++] =
-				pvr_fence_create_from_fence(fence_ctx,
-							    sync_checkpoint_ctx,
-							    fence,
-							    PVRSRV_NO_FENCE,
-							    "exclusive check fence");
-			if (!data->fences[data->nr_fences - 1]) {
-				data->nr_fences--;
-				PVR_FENCE_TRACE(fence,
-						"waiting on exclusive fence\n");
-				WARN_ON(dma_fence_wait(fence, true) <= 0);
-			}
-		}
-#else
 		exclusive = !!(pmr_flags[i] & PVR_BUFFER_FLAG_WRITE);
 		if (!exclusive) {
 			err = dma_resv_reserve_shared(resv
@@ -324,7 +420,6 @@ pvr_buffer_sync_check_fences_create(struct pvr_fence_context *fence_ctx,
 				}
 			}
 		}
-#endif
 	}
 
 	WARN_ON((i != nr_pmrs) || (data->nr_fences != fence_count));
@@ -339,6 +434,8 @@ err_check_data_free:
 	kfree(data);
 	return NULL;
 }
+
+#endif
 
 static void
 pvr_buffer_sync_check_fences_destroy(struct pvr_buffer_sync_check_data *data)
@@ -558,9 +655,6 @@ pvr_buffer_sync_kick_succeeded(struct pvr_buffer_sync_append_data *data)
 {
 	struct dma_resv *resv;
 	int i;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-	int r;
-#endif
 
 	dma_fence_enable_sw_signaling(&data->update_fence->base);
 
@@ -569,23 +663,19 @@ pvr_buffer_sync_kick_succeeded(struct pvr_buffer_sync_append_data *data)
 		if (WARN_ON_ONCE(!resv))
 			continue;
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-		r = dma_resv_reserve_fences(resv, 1);
-		if (r) {
-			/* As last resort on OOM we block for the fence */
-			dma_fence_wait(&data->update_fence->base, false);
-			continue;
-		}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)) || \
+	((LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)) && defined(CHROMIUMOS_KERNEL))
+		dma_resv_reserve_fences(resv, 1);
 #endif
-
 		if (data->pmr_flags[i] & PVR_BUFFER_FLAG_WRITE) {
 			PVR_FENCE_TRACE(&data->update_fence->base,
 					"added exclusive fence (%s) to resv %p\n",
 					data->update_fence->name, resv);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)) || \
+	((LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)) && defined(CHROMIUMOS_KERNEL))
 			dma_resv_add_fence(resv,
-						&data->update_fence->base,
-						DMA_RESV_USAGE_WRITE);
+					   &data->update_fence->base,
+					   DMA_RESV_USAGE_WRITE);
 #else
 			dma_resv_add_excl_fence(resv,
 						&data->update_fence->base);
@@ -594,10 +684,11 @@ pvr_buffer_sync_kick_succeeded(struct pvr_buffer_sync_append_data *data)
 			PVR_FENCE_TRACE(&data->update_fence->base,
 					"added non-exclusive fence (%s) to resv %p\n",
 					data->update_fence->name, resv);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)) || \
+	((LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)) && defined(CHROMIUMOS_KERNEL))
 			dma_resv_add_fence(resv,
-						&data->update_fence->base,
-						DMA_RESV_USAGE_READ);
+					   &data->update_fence->base,
+					   DMA_RESV_USAGE_READ);
 #else
 			dma_resv_add_shared_fence(resv,
 						  &data->update_fence->base);

@@ -62,11 +62,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 IMG_INTERNAL PVRSRV_ERROR BridgePMRExportPMR(IMG_HANDLE hBridge,
 					     IMG_HANDLE hPMR,
-					     IMG_HANDLE * phPMRExport,
-					     IMG_UINT64 * pui64Size,
-					     IMG_UINT32 * pui32Log2Contig,
-					     IMG_UINT64 * pui64Password)
+					     IMG_HANDLE *phPMRExport,
+					     IMG_UINT64 *pui64Size,
+					     IMG_UINT32 *pui32Log2Contig, IMG_UINT64 *pui64Password)
 {
+#if defined(SUPPORT_INSECURE_EXPORT)
 	PVRSRV_ERROR eError;
 	PMR *psPMRInt;
 	PMR_EXPORT *psPMRExportInt = NULL;
@@ -78,10 +78,21 @@ IMG_INTERNAL PVRSRV_ERROR BridgePMRExportPMR(IMG_HANDLE hBridge,
 
 	*phPMRExport = psPMRExportInt;
 	return eError;
+#else
+	PVR_UNREFERENCED_PARAMETER(hBridge);
+	PVR_UNREFERENCED_PARAMETER(hPMR);
+	PVR_UNREFERENCED_PARAMETER(phPMRExport);
+	PVR_UNREFERENCED_PARAMETER(pui64Size);
+	PVR_UNREFERENCED_PARAMETER(pui32Log2Contig);
+	PVR_UNREFERENCED_PARAMETER(pui64Password);
+
+	return PVRSRV_ERROR_NOT_IMPLEMENTED;
+#endif
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgePMRUnexportPMR(IMG_HANDLE hBridge, IMG_HANDLE hPMRExport)
 {
+#if defined(SUPPORT_INSECURE_EXPORT)
 	PVRSRV_ERROR eError;
 	PMR_EXPORT *psPMRExportInt;
 	PVR_UNREFERENCED_PARAMETER(hBridge);
@@ -91,10 +102,15 @@ IMG_INTERNAL PVRSRV_ERROR BridgePMRUnexportPMR(IMG_HANDLE hBridge, IMG_HANDLE hP
 	eError = PMRUnexportPMR(psPMRExportInt);
 
 	return eError;
+#else
+	PVR_UNREFERENCED_PARAMETER(hBridge);
+	PVR_UNREFERENCED_PARAMETER(hPMRExport);
+
+	return PVRSRV_ERROR_NOT_IMPLEMENTED;
+#endif
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgePMRGetUID(IMG_HANDLE hBridge,
-					  IMG_HANDLE hPMR, IMG_UINT64 * pui64UID)
+IMG_INTERNAL PVRSRV_ERROR BridgePMRGetUID(IMG_HANDLE hBridge, IMG_HANDLE hPMR, IMG_UINT64 *pui64UID)
 {
 	PVRSRV_ERROR eError;
 	PMR *psPMRInt;
@@ -108,7 +124,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgePMRGetUID(IMG_HANDLE hBridge,
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgePMRMakeLocalImportHandle(IMG_HANDLE hBridge,
-							 IMG_HANDLE hBuffer, IMG_HANDLE * phExtMem)
+							 IMG_HANDLE hBuffer, IMG_HANDLE *phExtMem)
 {
 	PVRSRV_ERROR eError;
 	PMR *psBufferInt;
@@ -140,8 +156,9 @@ IMG_INTERNAL PVRSRV_ERROR BridgePMRImportPMR(IMG_HANDLE hBridge,
 					     IMG_HANDLE hPMRExport,
 					     IMG_UINT64 ui64uiPassword,
 					     IMG_UINT64 ui64uiSize,
-					     IMG_UINT32 ui32uiLog2Contig, IMG_HANDLE * phPMR)
+					     IMG_UINT32 ui32uiLog2Contig, IMG_HANDLE *phPMR)
 {
+#if defined(SUPPORT_INSECURE_EXPORT)
 	PVRSRV_ERROR eError;
 	PMR_EXPORT *psPMRExportInt;
 	PMR *psPMRInt = NULL;
@@ -155,13 +172,22 @@ IMG_INTERNAL PVRSRV_ERROR BridgePMRImportPMR(IMG_HANDLE hBridge,
 
 	*phPMR = psPMRInt;
 	return eError;
+#else
+	PVR_UNREFERENCED_PARAMETER(hPMRExport);
+	PVR_UNREFERENCED_PARAMETER(ui64uiPassword);
+	PVR_UNREFERENCED_PARAMETER(ui64uiSize);
+	PVR_UNREFERENCED_PARAMETER(ui32uiLog2Contig);
+	PVR_UNREFERENCED_PARAMETER(phPMR);
+
+	return PVRSRV_ERROR_NOT_IMPLEMENTED;
+#endif
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgePMRLocalImportPMR(IMG_HANDLE hBridge,
 						  IMG_HANDLE hExtHandle,
-						  IMG_HANDLE * phPMR,
-						  IMG_DEVMEM_SIZE_T * puiSize,
-						  IMG_DEVMEM_ALIGN_T * puiAlign)
+						  IMG_HANDLE *phPMR,
+						  IMG_DEVMEM_SIZE_T *puiSize,
+						  IMG_DEVMEM_ALIGN_T *puiAlign)
 {
 	PVRSRV_ERROR eError;
 	PMR *psExtHandleInt;
@@ -189,33 +215,19 @@ IMG_INTERNAL PVRSRV_ERROR BridgePMRUnrefPMR(IMG_HANDLE hBridge, IMG_HANDLE hPMR)
 	return eError;
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgePMRUnrefUnlockPMR(IMG_HANDLE hBridge, IMG_HANDLE hPMR)
-{
-	PVRSRV_ERROR eError;
-	PMR *psPMRInt;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-
-	psPMRInt = (PMR *) hPMR;
-
-	eError = PMRUnrefUnlockPMR(psPMRInt);
-
-	return eError;
-}
-
 IMG_INTERNAL PVRSRV_ERROR BridgePhysmemNewRamBackedPMR(IMG_HANDLE hBridge,
 						       IMG_DEVMEM_SIZE_T uiSize,
-						       IMG_DEVMEM_SIZE_T uiChunkSize,
 						       IMG_UINT32 ui32NumPhysChunks,
 						       IMG_UINT32 ui32NumVirtChunks,
-						       IMG_UINT32 * pui32MappingTable,
+						       IMG_UINT32 *pui32MappingTable,
 						       IMG_UINT32 ui32Log2PageSize,
 						       PVRSRV_MEMALLOCFLAGS_T uiFlags,
 						       IMG_UINT32 ui32AnnotationLength,
-						       const IMG_CHAR * puiAnnotation,
+						       const IMG_CHAR *puiAnnotation,
 						       IMG_PID ui32PID,
-						       IMG_HANDLE * phPMRPtr,
+						       IMG_HANDLE *phPMRPtr,
 						       IMG_UINT32 ui32PDumpFlags,
-						       PVRSRV_MEMALLOCFLAGS_T * puiOutFlags)
+						       PVRSRV_MEMALLOCFLAGS_T *puiOutFlags)
 {
 	PVRSRV_ERROR eError;
 	PMR *psPMRPtrInt = NULL;
@@ -223,7 +235,6 @@ IMG_INTERNAL PVRSRV_ERROR BridgePhysmemNewRamBackedPMR(IMG_HANDLE hBridge,
 	eError =
 	    PhysmemNewRamBackedPMR_direct(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
 					  uiSize,
-					  uiChunkSize,
 					  ui32NumPhysChunks,
 					  ui32NumVirtChunks,
 					  pui32MappingTable,
@@ -237,104 +248,11 @@ IMG_INTERNAL PVRSRV_ERROR BridgePhysmemNewRamBackedPMR(IMG_HANDLE hBridge,
 	return eError;
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgePhysmemNewRamBackedLockedPMR(IMG_HANDLE hBridge,
-							     IMG_DEVMEM_SIZE_T uiSize,
-							     IMG_DEVMEM_SIZE_T uiChunkSize,
-							     IMG_UINT32 ui32NumPhysChunks,
-							     IMG_UINT32 ui32NumVirtChunks,
-							     IMG_UINT32 * pui32MappingTable,
-							     IMG_UINT32 ui32Log2PageSize,
-							     PVRSRV_MEMALLOCFLAGS_T uiFlags,
-							     IMG_UINT32 ui32AnnotationLength,
-							     const IMG_CHAR * puiAnnotation,
-							     IMG_PID ui32PID,
-							     IMG_HANDLE * phPMRPtr,
-							     IMG_UINT32 ui32PDumpFlags,
-							     PVRSRV_MEMALLOCFLAGS_T * puiOutFlags)
-{
-	PVRSRV_ERROR eError;
-	PMR *psPMRPtrInt = NULL;
-
-	eError =
-	    PhysmemNewRamBackedLockedPMR(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
-					 uiSize,
-					 uiChunkSize,
-					 ui32NumPhysChunks,
-					 ui32NumVirtChunks,
-					 pui32MappingTable,
-					 ui32Log2PageSize,
-					 uiFlags,
-					 ui32AnnotationLength,
-					 puiAnnotation,
-					 ui32PID, &psPMRPtrInt, ui32PDumpFlags, puiOutFlags);
-
-	*phPMRPtr = psPMRPtrInt;
-	return eError;
-}
-
-IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntPin(IMG_HANDLE hBridge, IMG_HANDLE hPMR)
-{
-	PVRSRV_ERROR eError;
-	PMR *psPMRInt;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-
-	psPMRInt = (PMR *) hPMR;
-
-	eError = DevmemIntPin(psPMRInt);
-
-	return eError;
-}
-
-IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntUnpin(IMG_HANDLE hBridge, IMG_HANDLE hPMR)
-{
-	PVRSRV_ERROR eError;
-	PMR *psPMRInt;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-
-	psPMRInt = (PMR *) hPMR;
-
-	eError = DevmemIntUnpin(psPMRInt);
-
-	return eError;
-}
-
-IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntPinValidate(IMG_HANDLE hBridge,
-						     IMG_HANDLE hMapping, IMG_HANDLE hPMR)
-{
-	PVRSRV_ERROR eError;
-	DEVMEMINT_MAPPING *psMappingInt;
-	PMR *psPMRInt;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-
-	psMappingInt = (DEVMEMINT_MAPPING *) hMapping;
-	psPMRInt = (PMR *) hPMR;
-
-	eError = DevmemIntPinValidate(psMappingInt, psPMRInt);
-
-	return eError;
-}
-
-IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntUnpinInvalidate(IMG_HANDLE hBridge,
-							 IMG_HANDLE hMapping, IMG_HANDLE hPMR)
-{
-	PVRSRV_ERROR eError;
-	DEVMEMINT_MAPPING *psMappingInt;
-	PMR *psPMRInt;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-
-	psMappingInt = (DEVMEMINT_MAPPING *) hMapping;
-	psPMRInt = (PMR *) hPMR;
-
-	eError = DevmemIntUnpinInvalidate(psMappingInt, psPMRInt);
-
-	return eError;
-}
-
 IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntCtxCreate(IMG_HANDLE hBridge,
 						   IMG_BOOL bbKernelMemoryCtx,
-						   IMG_HANDLE * phDevMemServerContext,
-						   IMG_HANDLE * phPrivData,
-						   IMG_UINT32 * pui32CPUCacheLineSize)
+						   IMG_HANDLE *phDevMemServerContext,
+						   IMG_HANDLE *phPrivData,
+						   IMG_UINT32 *pui32CPUCacheLineSize)
 {
 	PVRSRV_ERROR eError;
 	DEVMEMINT_CTX *psDevMemServerContextInt = NULL;
@@ -366,10 +284,9 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntCtxDestroy(IMG_HANDLE hBridge,
 
 IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntHeapCreate(IMG_HANDLE hBridge,
 						    IMG_HANDLE hDevmemCtx,
-						    IMG_DEV_VIRTADDR sHeapBaseAddr,
-						    IMG_DEVMEM_SIZE_T uiHeapLength,
-						    IMG_UINT32 ui32Log2DataPageSize,
-						    IMG_HANDLE * phDevmemHeapPtr)
+						    IMG_UINT32 ui32HeapConfigIndex,
+						    IMG_UINT32 ui32HeapIndex,
+						    IMG_HANDLE *phDevmemHeapPtr)
 {
 	PVRSRV_ERROR eError;
 	DEVMEMINT_CTX *psDevmemCtxInt;
@@ -380,8 +297,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntHeapCreate(IMG_HANDLE hBridge,
 
 	eError =
 	    DevmemIntHeapCreate(psDevmemCtxInt,
-				sHeapBaseAddr,
-				uiHeapLength, ui32Log2DataPageSize, &psDevmemHeapPtrInt);
+				ui32HeapConfigIndex, ui32HeapIndex, &psDevmemHeapPtrInt);
 
 	*phDevmemHeapPtr = psDevmemHeapPtrInt;
 	return eError;
@@ -401,40 +317,30 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntHeapDestroy(IMG_HANDLE hBridge, IMG_HAN
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntMapPMR(IMG_HANDLE hBridge,
-						IMG_HANDLE hDevmemServerHeap,
-						IMG_HANDLE hReservation,
-						IMG_HANDLE hPMR,
-						PVRSRV_MEMALLOCFLAGS_T uiMapFlags,
-						IMG_HANDLE * phMapping)
+						IMG_HANDLE hReservation, IMG_HANDLE hPMR)
 {
 	PVRSRV_ERROR eError;
-	DEVMEMINT_HEAP *psDevmemServerHeapInt;
 	DEVMEMINT_RESERVATION *psReservationInt;
 	PMR *psPMRInt;
-	DEVMEMINT_MAPPING *psMappingInt = NULL;
 	PVR_UNREFERENCED_PARAMETER(hBridge);
 
-	psDevmemServerHeapInt = (DEVMEMINT_HEAP *) hDevmemServerHeap;
 	psReservationInt = (DEVMEMINT_RESERVATION *) hReservation;
 	psPMRInt = (PMR *) hPMR;
 
-	eError =
-	    DevmemIntMapPMR(psDevmemServerHeapInt,
-			    psReservationInt, psPMRInt, uiMapFlags, &psMappingInt);
+	eError = DevmemIntMapPMR(psReservationInt, psPMRInt);
 
-	*phMapping = psMappingInt;
 	return eError;
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntUnmapPMR(IMG_HANDLE hBridge, IMG_HANDLE hMapping)
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntUnmapPMR(IMG_HANDLE hBridge, IMG_HANDLE hReservation)
 {
 	PVRSRV_ERROR eError;
-	DEVMEMINT_MAPPING *psMappingInt;
+	DEVMEMINT_RESERVATION *psReservationInt;
 	PVR_UNREFERENCED_PARAMETER(hBridge);
 
-	psMappingInt = (DEVMEMINT_MAPPING *) hMapping;
+	psReservationInt = (DEVMEMINT_RESERVATION *) hReservation;
 
-	eError = DevmemIntUnmapPMR(psMappingInt);
+	eError = DevmemIntUnmapPMR(psReservationInt);
 
 	return eError;
 }
@@ -443,17 +349,45 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntReserveRange(IMG_HANDLE hBridge,
 						      IMG_HANDLE hDevmemServerHeap,
 						      IMG_DEV_VIRTADDR sAddress,
 						      IMG_DEVMEM_SIZE_T uiLength,
-						      IMG_HANDLE * phReservation)
+						      PVRSRV_MEMALLOCFLAGS_T uiFlags,
+						      IMG_HANDLE *phReservation)
 {
 	PVRSRV_ERROR eError;
 	DEVMEMINT_HEAP *psDevmemServerHeapInt;
 	DEVMEMINT_RESERVATION *psReservationInt = NULL;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
 
 	psDevmemServerHeapInt = (DEVMEMINT_HEAP *) hDevmemServerHeap;
 
 	eError =
-	    DevmemIntReserveRange(psDevmemServerHeapInt, sAddress, uiLength, &psReservationInt);
+	    DevmemIntReserveRange(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
+				  psDevmemServerHeapInt,
+				  sAddress, uiLength, uiFlags, &psReservationInt);
+
+	*phReservation = psReservationInt;
+	return eError;
+}
+
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntReserveRangeAndMapPMR(IMG_HANDLE hBridge,
+							       IMG_HANDLE hDevmemServerHeap,
+							       IMG_DEV_VIRTADDR sAddress,
+							       IMG_DEVMEM_SIZE_T uiLength,
+							       IMG_HANDLE hPMR,
+							       PVRSRV_MEMALLOCFLAGS_T uiFlags,
+							       IMG_HANDLE *phReservation)
+{
+	PVRSRV_ERROR eError;
+	DEVMEMINT_HEAP *psDevmemServerHeapInt;
+	PMR *psPMRInt;
+	DEVMEMINT_RESERVATION *psReservationInt = NULL;
+
+	psDevmemServerHeapInt = (DEVMEMINT_HEAP *) hDevmemServerHeap;
+	psPMRInt = (PMR *) hPMR;
+
+	eError =
+	    DevmemIntReserveRangeAndMapPMR(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
+					   psDevmemServerHeapInt,
+					   sAddress,
+					   uiLength, psPMRInt, uiFlags, &psReservationInt);
 
 	*phReservation = psReservationInt;
 	return eError;
@@ -473,71 +407,23 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntUnreserveRange(IMG_HANDLE hBridge, IMG_
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgeChangeSparseMem(IMG_HANDLE hBridge,
-						IMG_HANDLE hSrvDevMemHeap,
-						IMG_HANDLE hPMR,
 						IMG_UINT32 ui32AllocPageCount,
-						IMG_UINT32 * pui32AllocPageIndices,
+						IMG_UINT32 *pui32AllocPageIndices,
 						IMG_UINT32 ui32FreePageCount,
-						IMG_UINT32 * pui32FreePageIndices,
-						IMG_UINT32 ui32SparseFlags,
-						PVRSRV_MEMALLOCFLAGS_T uiFlags,
-						IMG_DEV_VIRTADDR sDevVAddr, IMG_UINT64 ui64CPUVAddr)
+						IMG_UINT32 *pui32FreePageIndices,
+						IMG_UINT32 ui32SparseFlags, IMG_HANDLE hReservation)
 {
 	PVRSRV_ERROR eError;
-	DEVMEMINT_HEAP *psSrvDevMemHeapInt;
-	PMR *psPMRInt;
+	DEVMEMINT_RESERVATION *psReservationInt;
 	PVR_UNREFERENCED_PARAMETER(hBridge);
 
-	psSrvDevMemHeapInt = (DEVMEMINT_HEAP *) hSrvDevMemHeap;
-	psPMRInt = (PMR *) hPMR;
+	psReservationInt = (DEVMEMINT_RESERVATION *) hReservation;
 
 	eError =
-	    DevmemIntChangeSparse(psSrvDevMemHeapInt,
-				  psPMRInt,
-				  ui32AllocPageCount,
+	    DevmemIntChangeSparse(ui32AllocPageCount,
 				  pui32AllocPageIndices,
 				  ui32FreePageCount,
-				  pui32FreePageIndices,
-				  ui32SparseFlags, uiFlags, sDevVAddr, ui64CPUVAddr);
-
-	return eError;
-}
-
-IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntMapPages(IMG_HANDLE hBridge,
-						  IMG_HANDLE hReservation,
-						  IMG_HANDLE hPMR,
-						  IMG_UINT32 ui32PageCount,
-						  IMG_UINT32 ui32PhysicalPgOffset,
-						  PVRSRV_MEMALLOCFLAGS_T uiFlags,
-						  IMG_DEV_VIRTADDR sDevVAddr)
-{
-	PVRSRV_ERROR eError;
-	DEVMEMINT_RESERVATION *psReservationInt;
-	PMR *psPMRInt;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-
-	psReservationInt = (DEVMEMINT_RESERVATION *) hReservation;
-	psPMRInt = (PMR *) hPMR;
-
-	eError =
-	    DevmemIntMapPages(psReservationInt,
-			      psPMRInt, ui32PageCount, ui32PhysicalPgOffset, uiFlags, sDevVAddr);
-
-	return eError;
-}
-
-IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntUnmapPages(IMG_HANDLE hBridge,
-						    IMG_HANDLE hReservation,
-						    IMG_DEV_VIRTADDR sDevVAddr,
-						    IMG_UINT32 ui32PageCount)
-{
-	PVRSRV_ERROR eError;
-	DEVMEMINT_RESERVATION *psReservationInt;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-
-	psReservationInt = (DEVMEMINT_RESERVATION *) hReservation;
-
-	eError = DevmemIntUnmapPages(psReservationInt, sDevVAddr, ui32PageCount);
+				  pui32FreePageIndices, ui32SparseFlags, psReservationInt);
 
 	return eError;
 }
@@ -556,33 +442,6 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIsVDevAddrValid(IMG_HANDLE hBridge,
 				     psDevmemCtxInt, sAddress);
 
 	return eError;
-}
-
-IMG_INTERNAL PVRSRV_ERROR BridgeDevmemFlushDevSLCRange(IMG_HANDLE hBridge,
-						       IMG_HANDLE hDevmemCtx,
-						       IMG_DEV_VIRTADDR sAddress,
-						       IMG_DEVMEM_SIZE_T uiSize,
-						       IMG_BOOL bInvalidate)
-{
-#if defined(RGX_SRV_SLC_RANGEBASED_CFI_SUPPORTED)
-	PVRSRV_ERROR eError;
-	DEVMEMINT_CTX *psDevmemCtxInt;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-
-	psDevmemCtxInt = (DEVMEMINT_CTX *) hDevmemCtx;
-
-	eError = DevmemIntFlushDevSLCRange(psDevmemCtxInt, sAddress, uiSize, bInvalidate);
-
-	return eError;
-#else
-	PVR_UNREFERENCED_PARAMETER(hBridge);
-	PVR_UNREFERENCED_PARAMETER(hDevmemCtx);
-	PVR_UNREFERENCED_PARAMETER(sAddress);
-	PVR_UNREFERENCED_PARAMETER(uiSize);
-	PVR_UNREFERENCED_PARAMETER(bInvalidate);
-
-	return PVRSRV_ERROR_NOT_IMPLEMENTED;
-#endif
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgeDevmemInvalidateFBSCTable(IMG_HANDLE hBridge,
@@ -609,7 +468,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemInvalidateFBSCTable(IMG_HANDLE hBridge,
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgeHeapCfgHeapConfigCount(IMG_HANDLE hBridge,
-						       IMG_UINT32 * pui32NumHeapConfigs)
+						       IMG_UINT32 *pui32NumHeapConfigs)
 {
 	PVRSRV_ERROR eError;
 
@@ -622,7 +481,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgeHeapCfgHeapConfigCount(IMG_HANDLE hBridge,
 
 IMG_INTERNAL PVRSRV_ERROR BridgeHeapCfgHeapCount(IMG_HANDLE hBridge,
 						 IMG_UINT32 ui32HeapConfigIndex,
-						 IMG_UINT32 * pui32NumHeaps)
+						 IMG_UINT32 *pui32NumHeaps)
 {
 	PVRSRV_ERROR eError;
 
@@ -636,7 +495,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgeHeapCfgHeapCount(IMG_HANDLE hBridge,
 IMG_INTERNAL PVRSRV_ERROR BridgeHeapCfgHeapConfigName(IMG_HANDLE hBridge,
 						      IMG_UINT32 ui32HeapConfigIndex,
 						      IMG_UINT32 ui32HeapConfigNameBufSz,
-						      IMG_CHAR * puiHeapConfigName)
+						      IMG_CHAR *puiHeapConfigName)
 {
 	PVRSRV_ERROR eError;
 
@@ -651,12 +510,12 @@ IMG_INTERNAL PVRSRV_ERROR BridgeHeapCfgHeapDetails(IMG_HANDLE hBridge,
 						   IMG_UINT32 ui32HeapConfigIndex,
 						   IMG_UINT32 ui32HeapIndex,
 						   IMG_UINT32 ui32HeapNameBufSz,
-						   IMG_CHAR * puiHeapNameOut,
-						   IMG_DEV_VIRTADDR * psDevVAddrBase,
-						   IMG_DEVMEM_SIZE_T * puiHeapLength,
-						   IMG_DEVMEM_SIZE_T * puiReservedRegionLength,
-						   IMG_UINT32 * pui32Log2DataPageSizeOut,
-						   IMG_UINT32 * pui32Log2ImportAlignmentOut)
+						   IMG_CHAR *puiHeapNameOut,
+						   IMG_DEV_VIRTADDR *psDevVAddrBase,
+						   IMG_DEVMEM_SIZE_T *puiHeapLength,
+						   IMG_DEVMEM_SIZE_T *puiReservedRegionLength,
+						   IMG_UINT32 *pui32Log2DataPageSizeOut,
+						   IMG_UINT32 *pui32Log2ImportAlignmentOut)
 {
 	PVRSRV_ERROR eError;
 
@@ -675,36 +534,24 @@ IMG_INTERNAL PVRSRV_ERROR BridgeHeapCfgHeapDetails(IMG_HANDLE hBridge,
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgeDevmemIntRegisterPFNotifyKM(IMG_HANDLE hBridge,
-							    IMG_HANDLE hDevm,
-							    IMG_UINT32 ui32PID, IMG_BOOL bRegister)
+							    IMG_HANDLE hDevmemCtx,
+							    IMG_BOOL bRegister)
 {
 	PVRSRV_ERROR eError;
-	DEVMEMINT_CTX *psDevmInt;
+	DEVMEMINT_CTX *psDevmemCtxInt;
 	PVR_UNREFERENCED_PARAMETER(hBridge);
 
-	psDevmInt = (DEVMEMINT_CTX *) hDevm;
+	psDevmemCtxInt = (DEVMEMINT_CTX *) hDevmemCtx;
 
-	eError = DevmemIntRegisterPFNotifyKM(psDevmInt, ui32PID, bRegister);
-
-	return eError;
-}
-
-IMG_INTERNAL PVRSRV_ERROR BridgeGetMaxPhysHeapCount(IMG_HANDLE hBridge,
-						    IMG_UINT32 * pui32PhysHeapCount)
-{
-	PVRSRV_ERROR eError;
-
-	eError =
-	    PVRSRVGetMaxPhysHeapCountKM(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
-					pui32PhysHeapCount);
+	eError = DevmemIntRegisterPFNotifyKM(psDevmemCtxInt, bRegister);
 
 	return eError;
 }
 
 IMG_INTERNAL PVRSRV_ERROR BridgePhysHeapGetMemInfo(IMG_HANDLE hBridge,
 						   IMG_UINT32 ui32PhysHeapCount,
-						   PVRSRV_PHYS_HEAP * peaPhysHeapID,
-						   PHYS_HEAP_MEM_STATS * pasapPhysHeapMemStats)
+						   PVRSRV_PHYS_HEAP *peaPhysHeapID,
+						   PHYS_HEAP_MEM_STATS *pasapPhysHeapMemStats)
 {
 	PVRSRV_ERROR eError;
 
@@ -715,8 +562,7 @@ IMG_INTERNAL PVRSRV_ERROR BridgePhysHeapGetMemInfo(IMG_HANDLE hBridge,
 	return eError;
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgeGetDefaultPhysicalHeap(IMG_HANDLE hBridge,
-						       PVRSRV_PHYS_HEAP * peHeap)
+IMG_INTERNAL PVRSRV_ERROR BridgeGetDefaultPhysicalHeap(IMG_HANDLE hBridge, PVRSRV_PHYS_HEAP *peHeap)
 {
 	PVRSRV_ERROR eError;
 
@@ -726,22 +572,9 @@ IMG_INTERNAL PVRSRV_ERROR BridgeGetDefaultPhysicalHeap(IMG_HANDLE hBridge,
 	return eError;
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgeGetHeapPhysMemUsage(IMG_HANDLE hBridge,
-						    IMG_UINT32 ui32PhysHeapCount,
-						    PHYS_HEAP_MEM_STATS * pasapPhysHeapMemStats)
-{
-	PVRSRV_ERROR eError;
-
-	eError =
-	    PVRSRVGetHeapPhysMemUsageKM(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
-					ui32PhysHeapCount, pasapPhysHeapMemStats);
-
-	return eError;
-}
-
 IMG_INTERNAL PVRSRV_ERROR BridgeDevmemGetFaultAddress(IMG_HANDLE hBridge,
 						      IMG_HANDLE hDevmemCtx,
-						      IMG_DEV_VIRTADDR * psFaultAddress)
+						      IMG_DEV_VIRTADDR *psFaultAddress)
 {
 	PVRSRV_ERROR eError;
 	DEVMEMINT_CTX *psDevmemCtxInt;
@@ -755,18 +588,19 @@ IMG_INTERNAL PVRSRV_ERROR BridgeDevmemGetFaultAddress(IMG_HANDLE hBridge,
 	return eError;
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgePVRSRVUpdateOOMStats(IMG_HANDLE hBridge,
-						     IMG_UINT32 ui32ui32StatType, IMG_PID ui32pid)
+IMG_INTERNAL PVRSRV_ERROR BridgePVRSRVStatsUpdateOOMStat(IMG_HANDLE hBridge,
+							 IMG_UINT32 ui32ui32StatType,
+							 IMG_PID ui32pid)
 {
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 	PVRSRV_ERROR eError;
-	PVR_UNREFERENCED_PARAMETER(hBridge);
 
-	eError = PVRSRVServerUpdateOOMStats(ui32ui32StatType, ui32pid);
+	eError =
+	    PVRSRVStatsUpdateOOMStat(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
+				     ui32ui32StatType, ui32pid);
 
 	return eError;
 #else
-	PVR_UNREFERENCED_PARAMETER(hBridge);
 	PVR_UNREFERENCED_PARAMETER(ui32ui32StatType);
 	PVR_UNREFERENCED_PARAMETER(ui32pid);
 
@@ -774,31 +608,95 @@ IMG_INTERNAL PVRSRV_ERROR BridgePVRSRVUpdateOOMStats(IMG_HANDLE hBridge,
 #endif
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgePhysHeapGetMemInfoPkd(IMG_HANDLE hBridge,
-						      IMG_UINT32 ui32PhysHeapCount,
-						      PVRSRV_PHYS_HEAP * peaPhysHeapID,
-						      PHYS_HEAP_MEM_STATS_PKD *
-						      psapPhysHeapMemStats)
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemXIntReserveRange(IMG_HANDLE hBridge,
+						       IMG_HANDLE hDevmemServerHeap,
+						       IMG_DEV_VIRTADDR sAddress,
+						       IMG_DEVMEM_SIZE_T uiLength,
+						       IMG_HANDLE *phReservation)
 {
 	PVRSRV_ERROR eError;
+	DEVMEMINT_HEAP *psDevmemServerHeapInt;
+	DEVMEMXINT_RESERVATION *psReservationInt = NULL;
+	PVR_UNREFERENCED_PARAMETER(hBridge);
+
+	psDevmemServerHeapInt = (DEVMEMINT_HEAP *) hDevmemServerHeap;
 
 	eError =
-	    PVRSRVPhysHeapGetMemInfoPkdKM(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
-					  ui32PhysHeapCount, peaPhysHeapID, psapPhysHeapMemStats);
+	    DevmemXIntReserveRange(psDevmemServerHeapInt, sAddress, uiLength, &psReservationInt);
+
+	*phReservation = psReservationInt;
+	return eError;
+}
+
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemXIntUnreserveRange(IMG_HANDLE hBridge,
+							 IMG_HANDLE hReservation)
+{
+	PVRSRV_ERROR eError;
+	DEVMEMXINT_RESERVATION *psReservationInt;
+	PVR_UNREFERENCED_PARAMETER(hBridge);
+
+	psReservationInt = (DEVMEMXINT_RESERVATION *) hReservation;
+
+	eError = DevmemXIntUnreserveRange(psReservationInt);
 
 	return eError;
 }
 
-IMG_INTERNAL PVRSRV_ERROR BridgeGetHeapPhysMemUsagePkd(IMG_HANDLE hBridge,
-						       IMG_UINT32 ui32PhysHeapCount,
-						       PHYS_HEAP_MEM_STATS_PKD *
-						       psapPhysHeapMemStats)
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemXIntMapPages(IMG_HANDLE hBridge,
+						   IMG_HANDLE hReservation,
+						   IMG_HANDLE hPMR,
+						   IMG_UINT32 ui32PageCount,
+						   IMG_UINT32 ui32PhysPageOffset,
+						   PVRSRV_MEMALLOCFLAGS_T uiFlags,
+						   IMG_UINT32 ui32VirtPageOffset)
 {
 	PVRSRV_ERROR eError;
+	DEVMEMXINT_RESERVATION *psReservationInt;
+	PMR *psPMRInt;
+	PVR_UNREFERENCED_PARAMETER(hBridge);
+
+	psReservationInt = (DEVMEMXINT_RESERVATION *) hReservation;
+	psPMRInt = (PMR *) hPMR;
 
 	eError =
-	    PVRSRVGetHeapPhysMemUsagePkdKM(NULL, (PVRSRV_DEVICE_NODE *) ((void *)hBridge),
-					   ui32PhysHeapCount, psapPhysHeapMemStats);
+	    DevmemXIntMapPages(psReservationInt,
+			       psPMRInt,
+			       ui32PageCount, ui32PhysPageOffset, uiFlags, ui32VirtPageOffset);
+
+	return eError;
+}
+
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemXIntUnmapPages(IMG_HANDLE hBridge,
+						     IMG_HANDLE hReservation,
+						     IMG_UINT32 ui32VirtPageOffset,
+						     IMG_UINT32 ui32PageCount)
+{
+	PVRSRV_ERROR eError;
+	DEVMEMXINT_RESERVATION *psReservationInt;
+	PVR_UNREFERENCED_PARAMETER(hBridge);
+
+	psReservationInt = (DEVMEMXINT_RESERVATION *) hReservation;
+
+	eError = DevmemXIntUnmapPages(psReservationInt, ui32VirtPageOffset, ui32PageCount);
+
+	return eError;
+}
+
+IMG_INTERNAL PVRSRV_ERROR BridgeDevmemXIntMapVRangeToBackingPage(IMG_HANDLE hBridge,
+								 IMG_HANDLE hReservation,
+								 IMG_UINT32 ui32PageCount,
+								 PVRSRV_MEMALLOCFLAGS_T uiFlags,
+								 IMG_UINT32 ui32VirtPageOffset)
+{
+	PVRSRV_ERROR eError;
+	DEVMEMXINT_RESERVATION *psReservationInt;
+	PVR_UNREFERENCED_PARAMETER(hBridge);
+
+	psReservationInt = (DEVMEMXINT_RESERVATION *) hReservation;
+
+	eError =
+	    DevmemXIntMapVRangeToBackingPage(psReservationInt,
+					     ui32PageCount, uiFlags, ui32VirtPageOffset);
 
 	return eError;
 }

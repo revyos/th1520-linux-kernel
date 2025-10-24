@@ -49,9 +49,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #define APPHINT_OF_DRIVER_NO_DEVICE ((void*)-1U)
 
-#if defined(__linux__)
+#if defined(SUPPORT_DI_APPHINT_IMPL)
 
-#include "km_apphint.h"
+#include "os_apphintkm.h"
 #define PVRSRVAppHintDumpState(d) pvr_apphint_dump_state(d)
 #define PVRSRVAppHintRegisterHandlersUINT64(i,q,s,d,p) pvr_apphint_register_handlers_uint64(i,q,s,d,p)
 #define PVRSRVAppHintRegisterHandlersUINT32(i,q,s,d,p) pvr_apphint_register_handlers_uint32(i,q,s,d,p)

@@ -72,7 +72,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /*
 	SVM heap management support functions for CPU (un)mapping
  */
-#define DEVMEM_MAP_SVM_USER_MANAGED_RETRY				2
+#define DEVMEM_MAP_SVM_USER_MANAGED_RETRY				10
 
 static inline PVRSRV_ERROR
 DevmemCPUMapSVMKernelManaged(DEVMEM_HEAP *psHeap,
@@ -148,6 +148,8 @@ DevmemCPUMapSVMUserManaged(DEVMEM_HEAP *psHeap,
 	RA_BASE_T uiAllocatedAddr;
 	IMG_UINT64 ui64SvmMapAddr;
 	IMG_UINT uiRetry = 0;
+	IMG_UINT32 ui32TmpPaddingCount = 0;
+	DEVMEM_SIZE_T uiTmpPaddingSize = 0;
 	PVRSRV_ERROR eError;
 
 	/* If SVM heap management has transitioned to XXX_MANAGER_USER,
@@ -213,10 +215,10 @@ DevmemCPUMapSVMUserManaged(DEVMEM_HEAP *psHeap,
 			if (eError == PVRSRV_ERROR_RA_REQUEST_ALLOC_FAIL)
 			{
 				PVRSRV_ERROR eErr;
-				eErr = BridgePVRSRVUpdateOOMStats(GetBridgeHandle(psHeap->psCtx->hDevConnection),
-								  PVRSRV_PROCESS_STAT_TYPE_OOM_VIRTMEM_COUNT,
+				eErr = BridgePVRSRVStatsUpdateOOMStat(GetBridgeHandle(psHeap->psCtx->hDevConnection),
+								  PVRSRV_DEVICE_STAT_TYPE_OOM_VIRTMEM_COUNT,
 								  OSGetCurrentProcessID());
-				PVR_LOG_IF_ERROR(eErr, "BridgePVRSRVUpdateOOMStats");
+				PVR_LOG_IF_ERROR(eErr, "BridgePVRSRVStatsUpdateOOMStat");
 			}
 #endif
 			goto failSVM;
@@ -234,6 +236,12 @@ DevmemCPUMapSVMUserManaged(DEVMEM_HEAP *psHeap,
 		eError = DevmemImportStructCPUMap(psImport);
 		if (eError != PVRSRV_OK)
 		{
+			if (psHeap->ui32SVMBasePaddingCount == 0)
+			{
+				ui32TmpPaddingCount++;
+				uiTmpPaddingSize = uiAllocatedSize;
+			}
+
 			/* For now we simply discard failed RA_Alloc() obtained virtual
 			   address (i.e. plenty of virtual space), this prevents us from
 			   re-using these and furthermore essentially blacklists these
@@ -254,6 +262,12 @@ DevmemCPUMapSVMUserManaged(DEVMEM_HEAP *psHeap,
 			ui64SvmMapAddr = (IMG_UINT64)(uintptr_t)psImport->sCPUImport.pvCPUVAddr;
 		}
 	} while (eError != PVRSRV_OK);
+
+	if (psHeap->ui32SVMBasePaddingCount == 0)
+	{
+		psHeap->ui32SVMBasePaddingCount = ui32TmpPaddingCount;
+		psHeap->uiSVMBasePaddingSize = uiTmpPaddingSize;
+	}
 
 	*ui64MapAddress = ui64SvmMapAddr;
 failSVM:
@@ -685,7 +699,6 @@ PVRSRV_ERROR DevmemImportStructAlloc(SHARED_DEV_CONNECTION hDevConnection,
 
 	/* Setup some known bad values for things we don't have yet */
 	psImport->sDeviceImport.hReservation = LACK_OF_RESERVATION_POISON;
-	psImport->sDeviceImport.hMapping = LACK_OF_MAPPING_POISON;
 	psImport->sDeviceImport.psHeap = NULL;
 	psImport->sDeviceImport.bMapped = IMG_FALSE;
 
@@ -778,10 +791,10 @@ static PVRSRV_ERROR DevmemReserveVARange(DEVMEM_HEAP *psHeap,
 				(eError == PVRSRV_ERROR_RA_REQUEST_VIRT_ADDR_FAIL))
 		{
 			PVRSRV_ERROR eErr;
-			eErr = BridgePVRSRVUpdateOOMStats(GetBridgeHandle(psHeap->psCtx->hDevConnection),
-											PVRSRV_PROCESS_STAT_TYPE_INVALID_VIRTMEM,
+			eErr = BridgePVRSRVStatsUpdateOOMStat(GetBridgeHandle(psHeap->psCtx->hDevConnection),
+											PVRSRV_DEVICE_STAT_TYPE_INVALID_VIRTMEM,
 											OSGetCurrentProcessID());
-			PVR_LOG_IF_ERROR(eErr, "BridgePVRSRVUpdateOOMStats");
+			PVR_LOG_IF_ERROR(eErr, "BridgePVRSRVStatsUpdateOOMStat");
 		}
 #endif
 		return eError;
@@ -807,14 +820,13 @@ PVRSRV_ERROR DevmemImportStructDevMap(DEVMEM_HEAP *psHeap,
 	RA_BASE_T uiAllocatedAddr;
 	RA_LENGTH_T uiAllocatedSize;
 	IMG_DEV_VIRTADDR sBase;
-	IMG_HANDLE hReservation;
 	PVRSRV_ERROR eError;
 	IMG_UINT uiAlign;
 	IMG_BOOL bDestroyed = IMG_FALSE;
 
 	/* Round the provided import alignment to the configured heap alignment */
 	uiAlign = 1ULL << psHeap->uiLog2ImportAlignment;
-	uiAlign = (psImport->uiAlign + uiAlign - 1) & ~(uiAlign-1);
+	uiAlign = PVR_ALIGN(psImport->uiAlign, uiAlign);
 
 	psDeviceImport = &psImport->sDeviceImport;
 
@@ -885,10 +897,10 @@ PVRSRV_ERROR DevmemImportStructDevMap(DEVMEM_HEAP *psHeap,
 				if (eError == PVRSRV_ERROR_RA_REQUEST_ALLOC_FAIL)
 				{
 					PVRSRV_ERROR eErr;
-					eErr = BridgePVRSRVUpdateOOMStats(GetBridgeHandle(psHeap->psCtx->hDevConnection),
-									  PVRSRV_PROCESS_STAT_TYPE_OOM_VIRTMEM_COUNT,
+					eErr = BridgePVRSRVStatsUpdateOOMStat(GetBridgeHandle(psHeap->psCtx->hDevConnection),
+									  PVRSRV_DEVICE_STAT_TYPE_OOM_VIRTMEM_COUNT,
 									  OSGetCurrentProcessID());
-					PVR_LOG_IF_ERROR(eErr, "BridgePVRSRVUpdateOOMStats");
+					PVR_LOG_IF_ERROR(eErr, "BridgePVRSRVStatsUpdateOOMStat");
 				}
 #endif
 				PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_DEVICEMEM_OUT_OF_DEVICE_VM, failVMRAAlloc);
@@ -1007,39 +1019,39 @@ PVRSRV_ERROR DevmemImportStructDevMap(DEVMEM_HEAP *psHeap,
 
 		if (psHeap->bPremapped)
 		{
-			/* no virtual address reservation and mapping are required for memory that's already mapped */
+			/* No virtual address reservation and mapping are required for
+			 * memory that is already pre-mapped e.g. FW heaps in VZ configs */
 			psDeviceImport->hReservation = LACK_OF_RESERVATION_POISON;
-			psDeviceImport->hMapping = LACK_OF_MAPPING_POISON;
 		}
 		else
 		{
-			/* Setup page tables for the allocated VM space */
-			eError = BridgeDevmemIntReserveRange(GetBridgeHandle(psHeap->psCtx->hDevConnection),
-					psHeap->hDevMemServerHeap,
-					sBase,
-					uiAllocatedSize,
-					&hReservation);
-			PVR_GOTO_IF_ERROR(eError, failReserve);
-
+			PVRSRV_MEMALLOCFLAGS_T uiFlags;
+			uiFlags = psImport->uiFlags & PVRSRV_MEMALLOCFLAGS_PERMAPPINGFLAGSMASK;
 			if (bMap)
 			{
-				PVRSRV_MEMALLOCFLAGS_T uiMapFlags;
+				eError = BridgeDevmemIntReserveRangeAndMapPMR(GetBridgeHandle(psHeap->psCtx->hDevConnection),
+				                                              psHeap->hDevMemServerHeap,
+				                                              sBase,
+				                                              uiAllocatedSize,
+				                                              psImport->hPMR,
+				                                              uiFlags,
+				                                              &psDeviceImport->hReservation);
 
-				uiMapFlags = psImport->uiFlags & PVRSRV_MEMALLOCFLAGS_PERMAPPINGFLAGSMASK;
-
-				/* Actually map the PMR to allocated VM space */
-				eError = BridgeDevmemIntMapPMR(GetBridgeHandle(psHeap->psCtx->hDevConnection),
-						psHeap->hDevMemServerHeap,
-						hReservation,
-						psImport->hPMR,
-						uiMapFlags,
-						&psDeviceImport->hMapping);
-				PVR_GOTO_IF_ERROR(eError, failMap);
+				PVR_GOTO_IF_ERROR(eError, failReserve);
 
 				psDeviceImport->bMapped = IMG_TRUE;
 			}
-
-			psDeviceImport->hReservation = hReservation;
+			else
+			{
+				/* Setup page tables for the allocated VM space */
+				eError = BridgeDevmemIntReserveRange(GetBridgeHandle(psHeap->psCtx->hDevConnection),
+				                                     psHeap->hDevMemServerHeap,
+				                                     sBase,
+				                                     uiAllocatedSize,
+				                                     uiFlags,
+				                                     &psDeviceImport->hReservation);
+				PVR_GOTO_IF_ERROR(eError, failReserve);
+			}
 		}
 
 		/* Setup device mapping specific parts of the mapping info */
@@ -1061,12 +1073,6 @@ PVRSRV_ERROR DevmemImportStructDevMap(DEVMEM_HEAP *psHeap,
 
 	return PVRSRV_OK;
 
-failMap:
-	if (!psHeap->bPremapped)
-	{
-		BridgeDevmemIntUnreserveRange(GetBridgeHandle(psHeap->psCtx->hDevConnection),
-				hReservation);
-	}
 failReserve:
 	if (ui64OptionalMapAddress == 0)
 	{
@@ -1114,15 +1120,6 @@ IMG_BOOL DevmemImportStructDevUnmap(DEVMEM_IMPORT *psImport)
 
 		if (!psHeap->bPremapped)
 		{
-			if (psDeviceImport->bMapped)
-			{
-				eError = DestroyServerResource(psImport->hDevConnection,
-				                               NULL,
-				                               BridgeDevmemIntUnmapPMR,
-				                               psDeviceImport->hMapping);
-				PVR_ASSERT(eError == PVRSRV_OK);
-			}
-
 			eError = DestroyServerResource(psImport->hDevConnection,
 			                               NULL,
 			                               BridgeDevmemIntUnreserveRange,
@@ -1131,7 +1128,6 @@ IMG_BOOL DevmemImportStructDevUnmap(DEVMEM_IMPORT *psImport)
 		}
 
 		psDeviceImport->bMapped = IMG_FALSE;
-		psDeviceImport->hMapping = LACK_OF_MAPPING_POISON;
 		psDeviceImport->hReservation = LACK_OF_RESERVATION_POISON;
 
 		/* DEVMEM_HEAP_MANAGER_RA can also come from a dual managed heap in which case,

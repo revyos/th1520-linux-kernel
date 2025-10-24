@@ -55,14 +55,14 @@ extern "C" {
 typedef IMG_HANDLE PVRSRVTL_SD;
 
 /*! Maximum stream name length including the null byte */
-#define PRVSRVTL_MAX_STREAM_NAME_SIZE	40U
+#define PVRSRVTL_MAX_STREAM_NAME_SIZE	40U
 
 /*! Maximum number of streams expected to exist */
-#define PVRSRVTL_MAX_DISCOVERABLE_STREAMS_BUFFER (32*PRVSRVTL_MAX_STREAM_NAME_SIZE)
+#define PVRSRVTL_MAX_DISCOVERABLE_STREAMS_BUFFER (32*PVRSRVTL_MAX_STREAM_NAME_SIZE)
 
 /*! Packet lengths are always rounded up to a multiple of 8 bytes */
 #define PVRSRVTL_PACKET_ALIGNMENT		8U
-#define PVRSRVTL_ALIGN(x)				(((x)+PVRSRVTL_PACKET_ALIGNMENT-1U) & ~(PVRSRVTL_PACKET_ALIGNMENT-1U))
+#define PVRSRVTL_ALIGN(x)				PVR_ALIGN(x, PVRSRVTL_PACKET_ALIGNMENT)
 
 
 /*! A packet is made up of a header structure followed by the data bytes.
@@ -213,7 +213,7 @@ typedef IMG_UINT32 PVRSRVTL_PACKETTYPE;
 /*! Check if packets were dropped before this packet.
  * p is of type PVRSRVTL_PPACKETHDR.
  */
-#define CHECK_PACKETS_DROPPED(p)	(((p)->uiTypeSize & PVRSRVTL_PACKETHDR_OLDEST_DROPPED_MASK)>>PVRSRVTL_PACKETHDR_OLDEST_DROPPED_OFFSET)
+#define CHECK_PACKETS_DROPPED(p)	((((p)->uiTypeSize & PVRSRVTL_PACKETHDR_OLDEST_DROPPED_MASK)>>PVRSRVTL_PACKETHDR_OLDEST_DROPPED_OFFSET) != 0U)
 
 /*! Flags for use with PVRSRVTLOpenStream
  * 0x01 - Do not block in PVRSRVTLAcquireData() when no bytes are available

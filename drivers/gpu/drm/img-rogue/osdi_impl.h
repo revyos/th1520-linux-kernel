@@ -43,14 +43,21 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef OSDI_IMPL_H
 #define OSDI_IMPL_H
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
-#include <linux/stdarg.h>
+#if defined(__KERNEL__) && defined(__linux__)
+ #include <linux/version.h>
+
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+  #include <linux/stdarg.h>
+ #else
+  #include <stdarg.h>
+ #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) */
 #else
-#include <stdarg.h>
-#endif
+ #include <stdarg.h>
+#endif /* __KERNEL__ && __linux__ */
 
 #include "di_common.h"
 #include "pvrsrv_error.h"
+#include "img_defs.h"
 
 /*! Implementation callbacks. Those operations are performed on native
  * implementation handles. */
@@ -78,6 +85,7 @@ typedef struct OSDI_IMPL_ENTRY_CB
      * @Input pszFmt NUL-terminated format string
      * @Input va_list variable length argument list
      */
+    __printf(2, 0)
     void (*pfnVPrintf)(void *pvNativeHandle, const IMG_CHAR *pszFmt, va_list pArgs);
 
     /*! @Function pfnPuts

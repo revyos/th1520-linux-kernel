@@ -54,39 +54,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "opaque_types.h"
 
-/*
- * PDUMP MMU attributes
- */
-typedef struct _PDUMP_MMU_ATTRIB_DEVICE_
-{
-	/* Per-Device Pdump attribs */
-
-	/*!< Pdump memory bank name */
-	IMG_CHAR *pszPDumpMemDevName;
-
-	/*!< Pdump register bank name */
-	IMG_CHAR *pszPDumpRegDevName;
-
-} PDUMP_MMU_ATTRIB_DEVICE;
-
-typedef struct _PDUMP_MMU_ATTRIB_CONTEXT_
-{
-	IMG_UINT32 ui32Dummy;
-} PDUMP_MMU_ATTRIB_CONTEXT;
-
-typedef struct _PDUMP_MMU_ATTRIB_HEAP_
-{
-	/* data page info */
-	IMG_UINT32 ui32DataPageMask;
-} PDUMP_MMU_ATTRIB_HEAP;
-
-typedef struct _PDUMP_MMU_ATTRIB_
-{
-	struct _PDUMP_MMU_ATTRIB_DEVICE_ sDevice;
-	struct _PDUMP_MMU_ATTRIB_CONTEXT_ sContext;
-	struct _PDUMP_MMU_ATTRIB_HEAP_ sHeap;
-} PDUMP_MMU_ATTRIB;
-
 #if defined(PDUMP)
 PVRSRV_ERROR
 PDumpMMUMalloc(PPVRSRV_DEVICE_NODE psDeviceNode,
@@ -132,6 +99,9 @@ PDumpMMUDumpPxEntries(PPVRSRV_DEVICE_NODE psDeviceNode,
                       IMG_UINT64 uiPxEProtMask,
                       IMG_UINT64 uiDataValidEnable,
                       IMG_UINT32 ui32Flags,
+                      IMG_UINT32 ui32VAParity,
+                      IMG_UINT32 ui32ParityShift,
+                      IMG_UINT64 ui64ParityMask,
                       PDUMP_MMU_TYPE eMMUType);
 
 PVRSRV_ERROR

@@ -84,20 +84,26 @@ struct pvr_drm_private {
 	 */
 	void *sync_foreign_debug_notify_handle;
 #endif
+
+	/* Flag stating if the device was suspended/resumed. If this is 0 then
+	 * the device was either resumed or no suspend was called but if 1 then
+	 * the OS called suspend on this device.
+	 */
+	atomic_t suspended;
+
+	/* Padding for 8-byte alignment */
+	unsigned int uiPad1;
+
+	/* Handle associated with DKP for this DRM device */
+	void *hDeviceDKPRef;
 };
 
 extern const struct dev_pm_ops pvr_pm_ops;
 extern const struct drm_driver pvr_drm_generic_driver;
 extern const struct file_operations pvr_drm_fops;
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
 int pvr_drm_load(struct drm_device *ddev, unsigned long flags);
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0))
-int pvr_drm_unload(struct drm_device *ddev);
-#else
 void pvr_drm_unload(struct drm_device *ddev);
-#endif
-#endif
 
 int PVRSRV_BridgeDispatchKM(struct drm_device *dev, void *arg,
 			    struct drm_file *file);

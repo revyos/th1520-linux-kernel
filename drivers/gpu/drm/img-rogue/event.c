@@ -50,9 +50,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <linux/version.h>
 #include <linux/string.h>
 #include <linux/sched.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 #include <linux/sched/signal.h>
-#endif
 #include <linux/interrupt.h>
 #include <asm/hardirq.h>
 #include <linux/timer.h>
@@ -166,8 +164,17 @@ PVRSRV_ERROR LinuxEventObjectListDestroy(IMG_HANDLE hEventObjectList)
 	{
 		if (!list_empty(&psEvenObjectList->sList))
 		{
-			 PVR_DPF((PVR_DBG_ERROR, "LinuxEventObjectListDestroy: Event List is not empty"));
-			 return PVRSRV_ERROR_UNABLE_TO_DESTROY_EVENT;
+			struct list_head *list;
+
+			PVR_DPF((PVR_DBG_ERROR, "%s: Event List is not empty", __func__));
+			list_for_each(list, &psEvenObjectList->sList)
+			{
+				PVRSRV_LINUX_EVENT_OBJECT *psEvent;
+
+				psEvent = list_entry(list, PVRSRV_LINUX_EVENT_OBJECT, sList);
+				PVR_DPF((PVR_DBG_ERROR, "%s: Event Object @ " IMG_KM_PTR_FMTSPEC , __func__, psEvent));
+			}
+			return PVRSRV_ERROR_UNABLE_TO_DESTROY_EVENT;
 		}
 		OSFreeMem(psEvenObjectList);
 		/*not nulling pointer, copy on stack*/
@@ -331,7 +338,7 @@ void LinuxEventObjectDumpDebugInfo(IMG_HANDLE hOSEventObject)
 	PVRSRV_LINUX_EVENT_OBJECT *psLinuxEventObject = (PVRSRV_LINUX_EVENT_OBJECT *)hOSEventObject;
 
 	OSLockAcquire(psLinuxEventObject->hLock);
-	PVR_LOG(("%s: EvObj(%p) schedule: Avoided(%u) Called(%u) ReturnedImmediately(%u) SleptFully(%u) SleptPartially(%u)",
+	PVR_LOG(("%s: EvObj("IMG_KM_PTR_FMTSPEC ") schedule: Avoided(%u) Called(%u) ReturnedImmediately(%u) SleptFully(%u) SleptPartially(%u)",
 	         __func__, psLinuxEventObject, psLinuxEventObject->ui32ScheduleAvoided,
 			 psLinuxEventObject->ui32ScheduleCalled, psLinuxEventObject->ui32ScheduleReturnedImmediately,
 			 psLinuxEventObject->ui32ScheduleSleptFully, psLinuxEventObject->ui32ScheduleSleptPartially));
@@ -372,8 +379,10 @@ PVRSRV_ERROR LinuxEventObjectWait(IMG_HANDLE hOSEventObject,
 
 	DEFINE_WAIT(sWait);
 
-	PVRSRV_LINUX_EVENT_OBJECT *psLinuxEventObject = (PVRSRV_LINUX_EVENT_OBJECT *) hOSEventObject;
+	PVRSRV_LINUX_EVENT_OBJECT *psLinuxEventObject = (PVRSRV_LINUX_EVENT_OBJECT*)hOSEventObject;
 	PVRSRV_LINUX_EVENT_OBJECT_LIST *psLinuxEventObjectList = psLinuxEventObject->psLinuxEventObjectList;
+
+	PVR_ASSERT(psLinuxEventObjectList != NULL);
 
 	/* Check if the driver is good shape */
 	if (psPVRSRVData->eServicesState != PVRSRV_SERVICES_STATE_OK)
@@ -460,7 +469,7 @@ PVRSRV_ERROR LinuxEventObjectWait(IMG_HANDLE hOSEventObject,
 	OSLockRelease(psLinuxEventObject->hLock);
 #endif
 
-	if (signal_pending(current))
+	if (signal_pending(current) && test_tsk_thread_flag(current, TIF_SIGPENDING))
 	{
 		return PVRSRV_ERROR_INTERRUPTED;
 	}

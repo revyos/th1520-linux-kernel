@@ -41,17 +41,21 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
-//#define PVR_DPF_FUNCTION_TRACE_ON 1
+// #define PVR_DPF_FUNCTION_TRACE_ON 1
 #undef PVR_DPF_FUNCTION_TRACE_ON
 #include "pvr_debug.h"
 
 #include "allocmem.h"
 #include "pvrsrv_error.h"
 #include "osfunc.h"
+#include "dllist.h"
 #include "devicemem.h"
 
 #include "pvrsrv_tlcommon.h"
 #include "tlintern.h"
+#if defined(__KERNEL__)
+#include "tlstream.h"
+#endif
 
 /*
  * Make functions
@@ -113,6 +117,8 @@ TLInit(void)
 
 	PVR_ASSERT(sTLGlobalData.hTLGDLock == NULL && sTLGlobalData.hTLEventObj == NULL);
 
+	dllist_init(&sTLGlobalData.sNodeListHead);
+
 	/* Allocate a lock for TL global data, to be used while updating the TL data.
 	 * This is for making TL global data multi-thread safe */
 	eError = OSLockCreate(&sTLGlobalData.hTLGDLock);
@@ -136,42 +142,53 @@ e0:
 static void RemoveAndFreeStreamNode(PTL_SNODE psRemove)
 {
 	TL_GLOBAL_DATA*  psGD = TLGGD();
-	PTL_SNODE*       last;
-	PTL_SNODE        psn;
 	PVRSRV_ERROR     eError;
+	IMG_CHAR         aszName[PVRSRVTL_MAX_STREAM_NAME_SIZE];
+	IMG_BOOL         bHadRDesc = IMG_FALSE;
+	IMG_BOOL         bHadStream = IMG_FALSE;
+
+	PVR_UNREFERENCED_PARAMETER(bHadRDesc);
 
 	PVR_DPF_ENTERED;
 
 	/* Unlink the stream node from the master list */
-	PVR_ASSERT(psGD->psHead);
-	last = &psGD->psHead;
-	for (psn = psGD->psHead; psn; psn=psn->psNext)
+	PVR_ASSERT(!dllist_is_empty(&psGD->sNodeListHead));
+	OSLockHeldAssert(psGD->hTLGDLock);
+
+	dllist_remove_node(&psRemove->sNodeList);
+	if (psRemove->psRDesc)
 	{
-		if (psn == psRemove)
-		{
-			/* Other calling code may have freed and zeroed the pointers */
-			if (psn->psRDesc)
-			{
-				OSFreeMem(psn->psRDesc);
-				psn->psRDesc = NULL;
-			}
-			if (psn->psStream)
-			{
-				OSFreeMem(psn->psStream);
-				psn->psStream = NULL;
-			}
-			*last = psn->psNext;
-			break;
-		}
-		last = &psn->psNext;
+		bHadRDesc = IMG_TRUE;
+		OSFreeMem(psRemove->psRDesc);
+		psRemove->psRDesc = NULL;
+	}
+	if (psRemove->psStream)
+	{
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING, "%s: Freeing '%s'", __func__,
+		         psRemove->psStream->szName));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+		OSStringSafeCopy(aszName, psRemove->psStream->szName,
+		                 PVRSRVTL_MAX_STREAM_NAME_SIZE);
+		OSFreeMem(psRemove->psStream);
+		psRemove->psStream = NULL;
+		bHadStream = IMG_TRUE;
 	}
 
 	/* Release the event list object owned by the stream node */
-	if (psRemove->hReadEventObj)
+	if (psRemove->hReadEventObj && bHadStream)
 	{
 		eError = OSEventObjectDestroy(psRemove->hReadEventObj);
 		PVR_LOG_IF_ERROR(eError, "OSEventObjectDestroy");
+		if (eError != PVRSRV_OK)
+		{
+			PVR_DPF((PVR_DBG_WARNING, "%s: hReadEventObj = %p, RDesc = '%s'",
+			         __func__, psRemove->hReadEventObj,
+			         bHadRDesc ? "True" : "False"));
+			PVR_DPF((PVR_DBG_WARNING, "%s: Stream Name = <%s>", __func__,
+			         aszName));
 
+		}
 		psRemove->hReadEventObj = NULL;
 	}
 
@@ -183,45 +200,49 @@ static void RemoveAndFreeStreamNode(PTL_SNODE psRemove)
 
 static void FreeGlobalData(void)
 {
-	PTL_SNODE psCurrent = sTLGlobalData.psHead;
-	PTL_SNODE psNext;
 	PVRSRV_ERROR eError;
+	PDLLIST_NODE psNode, psNext;
+
+	TL_GLOBAL_DATA*  psGD = TLGGD();
 
 	PVR_DPF_ENTERED;
 
 	/* Clean up the SNODE list */
-	if (psCurrent)
+	dllist_foreach_node(&psGD->sNodeListHead, psNode, psNext)
 	{
-		while (psCurrent)
+		TL_SNODE *psTLSNode = IMG_CONTAINER_OF(psNode, TL_SNODE, sNodeList);
+
+		dllist_remove_node(psNode);
+		psGD->uiClientCnt--;
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING, "%s: Clearing out node @ %p, Stream '%s'",
+		         __func__, psTLSNode, psTLSNode->psStream ?
+		         psTLSNode->psStream->szName : "Unknown!!"));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+		if (psTLSNode->psRDesc)
 		{
-			psNext = psCurrent->psNext;
-
-			/* Other calling code may have freed and zeroed the pointers */
-			if (psCurrent->psRDesc)
-			{
-				OSFreeMem(psCurrent->psRDesc);
-				psCurrent->psRDesc = NULL;
-			}
-			if (psCurrent->psStream)
-			{
-				OSFreeMem(psCurrent->psStream);
-				psCurrent->psStream = NULL;
-			}
-
-			/* Release the event list object owned by the stream node */
-			if (psCurrent->hReadEventObj)
-			{
-				eError = OSEventObjectDestroy(psCurrent->hReadEventObj);
-				PVR_LOG_IF_ERROR(eError, "OSEventObjectDestroy");
-
-				psCurrent->hReadEventObj = NULL;
-			}
-
-			OSFreeMem(psCurrent);
-			psCurrent = psNext;
+			OSFreeMem(psTLSNode->psRDesc);
+			psTLSNode->psRDesc = NULL;
+		}
+		if (psTLSNode->psStream)
+		{
+			OSFreeMem(psTLSNode->psStream);
+			psTLSNode->psStream = NULL;
 		}
 
-		sTLGlobalData.psHead = NULL;
+		/* Release the event list object owned by the stream node */
+		if (psTLSNode->hReadEventObj)
+		{
+			eError = OSEventObjectDestroy(psTLSNode->hReadEventObj);
+			PVR_LOG_IF_ERROR(eError, "OSEventObjectDestroy");
+
+			psTLSNode->hReadEventObj = NULL;
+		}
+
+		OSFreeMem(psTLSNode);
+
 	}
 
 	PVR_DPF_RETURN;
@@ -230,12 +251,52 @@ static void FreeGlobalData(void)
 void
 TLDeInit(void)
 {
+	DLLIST_NODE *psNode, *psNext;
+
 	PVR_DPF_ENTERED;
 
 	if (sTLGlobalData.uiClientCnt)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "TLDeInit transport layer but %d client streams are still connected", sTLGlobalData.uiClientCnt));
 		sTLGlobalData.uiClientCnt = 0;
+	}
+
+	if (!dllist_is_empty(&sTLGlobalData.sNodeListHead))
+	{
+		if (!TL_DEFERRED_FREE_COUNT(sTLGlobalData.uiTLDeferredFrees))
+		{
+			PVR_DPF((PVR_DBG_ERROR,
+		         "TLDeInit transport layer - resources still allocated"));
+		}
+		dllist_foreach_node(&sTLGlobalData.sNodeListHead, psNode, psNext)
+		{
+			TL_SNODE *psTLNode = IMG_CONTAINER_OF(
+			    psNode, TL_SNODE, sNodeList);
+
+			if (psTLNode->psStream)
+			{
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+				PVR_DPF((PVR_DBG_WARNING,
+				         "Decoupling '%s'", psTLNode->psStream->szName));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+#if defined(__KERNEL__)
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+				PVR_DPF((PVR_DBG_WARNING, "%s: Attempting to close '%s'",
+				         __func__, psTLNode->psStream->szName));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+				TLStreamClose((IMG_HANDLE)(psTLNode->psStream));
+#else
+				dllist_remove_node(psNode);
+				OSFreeMem(psTLNode);
+#endif
+			}
+			else
+			{
+				dllist_remove_node(psNode);
+				OSFreeMem(psTLNode);
+			}
+		}
 	}
 
 	FreeGlobalData();
@@ -259,11 +320,14 @@ TLDeInit(void)
 
 void TLAddStreamNode(PTL_SNODE psAdd)
 {
+	TL_GLOBAL_DATA *psGD = TLGGD();
+
 	PVR_DPF_ENTERED;
 
 	PVR_ASSERT(psAdd);
-	psAdd->psNext = TLGGD()->psHead;
-	TLGGD()->psHead = psAdd;
+	OSLockHeldAssert(psGD->hTLGDLock);
+
+	dllist_add_to_head(&psGD->sNodeListHead, &psAdd->sNodeList);
 
 	PVR_DPF_RETURN;
 }
@@ -272,14 +336,19 @@ PTL_SNODE TLFindStreamNodeByName(const IMG_CHAR *pszName)
 {
 	TL_GLOBAL_DATA* psGD = TLGGD();
 	PTL_SNODE psn;
+	PDLLIST_NODE psNext, psNode;
 
 	PVR_DPF_ENTERED;
 
 	PVR_ASSERT(pszName);
+	OSLockHeldAssert(psGD->hTLGDLock);
 
-	for (psn = psGD->psHead; psn; psn=psn->psNext)
+	dllist_foreach_node(&psGD->sNodeListHead, psNode, psNext)
 	{
-		if (psn->psStream && OSStringNCompare(psn->psStream->szName, pszName, PRVSRVTL_MAX_STREAM_NAME_SIZE)==0)
+		psn = IMG_CONTAINER_OF(psNode, TL_SNODE, sNodeList);
+
+		if (psn->psStream && OSStringNCompare(psn->psStream->szName,
+		    pszName, PVRSRVTL_MAX_STREAM_NAME_SIZE)==0)
 		{
 			PVR_DPF_RETURN_VAL(psn);
 		}
@@ -292,13 +361,17 @@ PTL_SNODE TLFindStreamNodeByDesc(PTL_STREAM_DESC psDesc)
 {
 	TL_GLOBAL_DATA* psGD = TLGGD();
 	PTL_SNODE psn;
+	PDLLIST_NODE psNext, psNode;
 
 	PVR_DPF_ENTERED;
 
 	PVR_ASSERT(psDesc);
+	OSLockHeldAssert(psGD->hTLGDLock);
 
-	for (psn = psGD->psHead; psn; psn=psn->psNext)
+	dllist_foreach_node(&psGD->sNodeListHead, psNode, psNext)
 	{
+		psn = IMG_CONTAINER_OF(psNode, TL_SNODE, sNodeList);
+
 		if (psn->psRDesc == psDesc || psn->psWDesc == psDesc)
 		{
 			PVR_DPF_RETURN_VAL(psn);
@@ -307,53 +380,26 @@ PTL_SNODE TLFindStreamNodeByDesc(PTL_STREAM_DESC psDesc)
 	PVR_DPF_RETURN_VAL(NULL);
 }
 
-static inline IMG_BOOL IsDigit(IMG_CHAR c)
-{
-	return c >= '0' && c <= '9';
-}
-
-static inline IMG_BOOL ReadNumber(const IMG_CHAR *pszBuffer,
-                                  IMG_UINT32 *pui32Number)
-{
-	IMG_CHAR acTmp[11] = {0}; /* max 10 digits */
-	IMG_UINT32 ui32Result;
-	IMG_UINT i;
-
-	for (i = 0; i < sizeof(acTmp) - 1; i++)
-	{
-		if (!IsDigit(*pszBuffer))
-			break;
-		acTmp[i] = *pszBuffer++;
-	}
-
-	/* if there are no digits or there is something after the number */
-	if (i == 0 || *pszBuffer != '\0')
-		return IMG_FALSE;
-
-	if (OSStringToUINT32(acTmp, 10, &ui32Result) != PVRSRV_OK)
-		return IMG_FALSE;
-
-	*pui32Number = ui32Result;
-
-	return IMG_TRUE;
-}
-
 IMG_UINT32 TLDiscoverStreamNodes(const IMG_CHAR *pszNamePattern,
-                          IMG_CHAR aaszStreams[][PRVSRVTL_MAX_STREAM_NAME_SIZE],
+                          IMG_CHAR aaszStreams[][PVRSRVTL_MAX_STREAM_NAME_SIZE],
                           IMG_UINT32 ui32Max)
 {
 	TL_GLOBAL_DATA *psGD = TLGGD();
 	PTL_SNODE psn;
 	IMG_UINT32 ui32Count = 0;
 	size_t uiLen;
+	PDLLIST_NODE psNode, psNext;
 
 	PVR_ASSERT(pszNamePattern);
+	OSLockHeldAssert(psGD->hTLGDLock);
 
 	if ((uiLen = OSStringLength(pszNamePattern)) == 0)
 		return 0;
 
-	for (psn = psGD->psHead; psn; psn = psn->psNext)
+	dllist_foreach_node(&psGD->sNodeListHead, psNode, psNext)
 	{
+		psn = IMG_CONTAINER_OF(psNode, TL_SNODE, sNodeList);
+
 		if (OSStringNCompare(pszNamePattern, psn->psStream->szName, uiLen) != 0)
 			continue;
 
@@ -366,8 +412,8 @@ IMG_UINT32 TLDiscoverStreamNodes(const IMG_CHAR *pszNamePattern,
 				break;
 
 			/* all of names are shorter than MAX and null terminated */
-			OSStringLCopy(aaszStreams[ui32Count], psn->psStream->szName,
-			              PRVSRVTL_MAX_STREAM_NAME_SIZE);
+			OSStringSafeCopy(aaszStreams[ui32Count], psn->psStream->szName,
+			              PVRSRVTL_MAX_STREAM_NAME_SIZE);
 		}
 
 		ui32Count++;
@@ -409,9 +455,29 @@ IMG_BOOL TLTryRemoveStreamAndFreeStreamNode(PTL_SNODE psRemove)
 
 	PVR_ASSERT(psRemove);
 
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	PVR_DPF((PVR_DBG_WARNING, "%s: Trying to remove '%s' Descs = {%p, %p}",
+	         __func__, psRemove->psStream->szName, psRemove->psRDesc,
+	         psRemove->psWDesc));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
 	/* If there is a client connected to this stream, defer stream's deletion */
 	if (psRemove->psRDesc != NULL || psRemove->psWDesc != NULL)
 	{
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		if (psRemove->psRDesc != NULL)
+		{
+			PVR_DPF((PVR_DBG_WARNING,
+			         "%s: RDescs present - WRefCount [%x] DescRefCount [%x]",
+		         __func__, psRemove->uiWRefCount, psRemove->psRDesc->uiRefCount));
+		}
+		if (psRemove->psWDesc != NULL)
+		{
+			PVR_DPF((PVR_DBG_WARNING,
+			         "%s: WDescs present - WRefCount [%x] DescRefCount [%x]",
+			         __func__, psRemove->uiWRefCount, psRemove->psWDesc->uiRefCount));
+		}
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
 		PVR_DPF_RETURN_VAL(IMG_FALSE);
 	}
 
@@ -430,23 +496,92 @@ IMG_BOOL TLUnrefDescAndTryFreeStreamNode(PTL_SNODE psNodeToRemove,
 	PVR_ASSERT(psNodeToRemove);
 	PVR_ASSERT(psSD);
 
+	/* Decrement the reference count of the PTL_STREAM_DESC only if we're
+	 * releasing the last reference held by the psNodeToRemove associated
+	 * structure.
+	 */
+	if ((psNodeToRemove->i32RefCount > 0) ||
+	    (psNodeToRemove->psStream->i32RefCount > 0))
+	{
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING, "%s: Dropping '%s' refcount [%d, %d]"
+		         "RRef [%x]. WRef [%x], WRefCount [%x]",
+		         __func__,
+		         psNodeToRemove->psStream->szName,
+		         psNodeToRemove->i32RefCount,
+		         psNodeToRemove->psStream->i32RefCount,
+		         psNodeToRemove->psRDesc ? psNodeToRemove->psRDesc->uiRefCount : 0,
+		         psNodeToRemove->psWDesc ? psNodeToRemove->psWDesc->uiRefCount : 0,
+		         psSD->uiRefCount));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+		if (psNodeToRemove->psStream->i32RefCount > 0)
+		{
+			psNodeToRemove->psStream->i32RefCount--;
+		}
+		if (psNodeToRemove->i32RefCount > 0)
+		{
+			psNodeToRemove->i32RefCount--;
+		}
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING,
+		         "%s: Async close = '%s' for '%s'",
+		         __func__,
+		         psNodeToRemove->psStream->bAsyncClose ? "TRUE" : "FALSE",
+		         psNodeToRemove->psStream->szName));
+
+		PVR_DPF((PVR_DBG_WARNING, "%s: SNode: WRefCount [%x], RDesc [%x], WDesc [%x]",
+		         __func__, psNodeToRemove->uiWRefCount,
+		         psNodeToRemove->psRDesc ? psNodeToRemove->psRDesc->uiRefCount : 0,
+		         psNodeToRemove->psWDesc ? psNodeToRemove->psWDesc->uiRefCount : 0));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+	}
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	else
+	{
+		PVR_DPF((PVR_DBG_WARNING,
+		         "%s: Freeing '%s' refCount {%d, %d}, WRefCount [%x], Ref [%x]",
+		         __func__,
+		         psNodeToRemove->psStream->szName,
+		         psNodeToRemove->i32RefCount,
+		         psNodeToRemove->psStream->i32RefCount,
+		         psNodeToRemove->uiWRefCount, psSD->uiRefCount));
+	}
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
 	/* Decrement reference count. For descriptor obtained by reader it must
 	 * reach 0 (only single reader allowed) and for descriptors obtained by
 	 * writers it must reach value greater or equal to 0 (multiple writers
 	 * model). */
-	psSD->uiRefCount--;
+	if (psSD->uiRefCount > 0)
+	{
+		psSD->uiRefCount--;
+	}
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	else
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: '%s': Potential underrun detected!",
+		         __func__, psNodeToRemove->psStream->szName));
+	}
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
 
 	if (psSD == psNodeToRemove->psRDesc)
 	{
-		PVR_ASSERT(0 == psSD->uiRefCount);
-		/* Remove stream descriptor (i.e. stream reader context) */
-		psNodeToRemove->psRDesc = NULL;
+		if (0 == psSD->uiRefCount)
+		{
+			/* Remove stream descriptor (i.e. stream reader context) */
+			psNodeToRemove->psRDesc = NULL;
+		}
 	}
 	else if (psSD == psNodeToRemove->psWDesc)
 	{
 		PVR_ASSERT(0 <= psSD->uiRefCount);
 
-		psNodeToRemove->uiWRefCount--;
+		if (psNodeToRemove->uiWRefCount > 0)
+		{
+			psNodeToRemove->uiWRefCount--;
+		}
 
 		/* Remove stream descriptor if reference == 0 */
 		if (0 == psSD->uiRefCount)
@@ -470,4 +605,159 @@ IMG_BOOL TLUnrefDescAndTryFreeStreamNode(PTL_SNODE psNodeToRemove,
 	RemoveAndFreeStreamNode(psNodeToRemove);
 
 	PVR_DPF_RETURN_VAL(IMG_TRUE);
+}
+
+void TLActivateDeferredFree(void)
+{
+	TL_GLOBAL_DATA *psGD = TLGGD();
+	PTL_SNODE psTLSNode;
+	PDLLIST_NODE psNode, psNext;
+
+	OSLockAcquire (psGD->hTLGDLock);
+
+	if (TL_HAS_DEFERRED_FREE(psGD->uiTLDeferredFrees))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Deferred Free marked as present already",
+		         __func__));
+
+		OSLockRelease (psGD->hTLGDLock);
+		return;
+	}
+
+	/* Find all current Stream Descriptors and bump their i32RefCount values
+	 * so that the streams persist until the TLDeactivateDeferredFree() routine
+	 * is called at consumer destruction time.
+	 */
+	psGD->uiTLDeferredFrees = TL_DEFERRED_FREE_BIT;
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	PVR_DPF((PVR_DBG_WARNING, "%s: %d Clients present", __func__,
+	         psGD->uiClientCnt));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+	dllist_foreach_node(&psGD->sNodeListHead, psNode, psNext)
+	{
+		psTLSNode = IMG_CONTAINER_OF(psNode, TL_SNODE, sNodeList);
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING, "%s: Stream '%s', RefCount [%d, %d]",
+		         __func__, psTLSNode->psStream->szName,
+		         psTLSNode->i32RefCount,psTLSNode->psStream->i32RefCount));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+		psTLSNode->i32RefCount++;
+		psTLSNode->psStream->i32RefCount++;
+
+		/* Bump the uiWRefCount for the SNODE and increment the SDESC uiRefCount
+		 * for those descriptors present (psRDesc / psWDesc)
+		 */
+		psTLSNode->uiWRefCount++;
+		if (psTLSNode->psRDesc)
+		{
+			psTLSNode->psRDesc->uiRefCount++;
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+			/* Dump OSEvent associated with descriptor */
+			PVR_DPF((PVR_DBG_WARNING, "%s: RDesc Event %p",
+			         __func__, psTLSNode->psRDesc->hReadEvent));
+#if defined(__KERNEL__)
+			OSEventObjectDumpDebugInfo(psTLSNode->psRDesc->hReadEvent);
+#endif
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+		}
+		if (psTLSNode->psWDesc)
+		{
+			psTLSNode->psWDesc->uiRefCount++;
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+			/* Dump OSEvent associated with descriptor */
+			PVR_DPF((PVR_DBG_WARNING, "%s: WDesc Event %p",
+			         __func__, psTLSNode->psWDesc->hReadEvent));
+#if defined(__KERNEL__)
+			OSEventObjectDumpDebugInfo(psTLSNode->psWDesc->hReadEvent);
+#endif
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+		}
+		TL_DEFERRED_FREE_INC(psGD->uiTLDeferredFrees);
+	}
+
+	OSLockRelease (psGD->hTLGDLock);
+}
+
+void TLDeactivateDeferredFree(void)
+{
+	TL_GLOBAL_DATA *psGD = TLGGD();
+	PTL_SNODE psTLSNode;
+	PDLLIST_NODE psNode, psNext;
+
+	OSLockAcquire (psGD->hTLGDLock);
+
+	if (!TL_HAS_DEFERRED_FREE(psGD->uiTLDeferredFrees))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Missing Deferred Free flag", __func__));
+
+		OSLockRelease (psGD->hTLGDLock);
+		return;
+	}
+
+	/* Save the number of still active clients as our DeferredFrees count */
+	psGD->uiTLDeferredFrees = 0U;
+
+	dllist_foreach_node(&psGD->sNodeListHead, psNode, psNext)
+	{
+		psTLSNode = IMG_CONTAINER_OF(psNode, TL_SNODE, sNodeList);
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING, "%s: Stream '%s', RefCount [%d, %d]",
+		         __func__, psTLSNode->psStream->szName,
+		         psTLSNode->i32RefCount,psTLSNode->psStream->i32RefCount));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+		if (psTLSNode->i32RefCount > 0)
+		{
+			psTLSNode->i32RefCount--;
+		}
+		if (psTLSNode->psStream->i32RefCount > 0)
+		{
+			psTLSNode->psStream->i32RefCount--;
+		}
+
+		if ((psTLSNode->psStream->i32RefCount == 0) &&
+		    (psTLSNode->i32RefCount == 0))
+		{
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+			PVR_DPF((PVR_DBG_WARNING,
+			         "%s: Deferred close candidate '%s'", __func__,
+			         psTLSNode->psStream->szName));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+		}
+
+		/* Drop the extra bumped SNode reference counts obtained during the
+		 * TLActivateDeferredFree() processing.
+		 */
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING, "%s: uiWRefCount = [%x]", __func__,
+		         psTLSNode->uiWRefCount));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+		if (psTLSNode->uiWRefCount > 0)
+		{
+			psTLSNode->uiWRefCount--;
+		}
+		else
+		{
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+			PVR_DPF((PVR_DBG_WARNING, "%s: Potential under-run",
+			         __func__));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+		}
+		if (psTLSNode->psRDesc)
+		{
+			psTLSNode->psRDesc->uiRefCount--;
+		}
+		if (psTLSNode->psWDesc)
+		{
+			psTLSNode->psWDesc->uiRefCount--;
+		}
+		TL_DEFERRED_FREE_INC(psGD->uiTLDeferredFrees);
+	}
+
+	OSLockRelease (psGD->hTLGDLock);
 }

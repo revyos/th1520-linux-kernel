@@ -49,6 +49,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "allocmem.h"
 #include "devicemem.h"
 #include "pvrsrv_error.h"
+#include "sysinfo.h"
 #include "osfunc.h"
 #include "log2.h"
 
@@ -58,6 +59,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv.h"
 
 #define EVENT_OBJECT_TIMEOUT_US 1000000ULL
+
+#if !defined(EVENT_OBJECT_TIMEOUT_US)
+#error EVENT_OBJECT_TIMEOUT_US should be defined in sysinfo.h
+#endif
+
 #define READ_PENDING_TIMEOUT_US 100000ULL
 
 /*! Compute maximum TL packet size for this stream. Max packet size will be
@@ -149,13 +155,14 @@ PVRSRV_ERROR TLAllocSharedMemIfNull(IMG_HANDLE hStream)
 	 * memory barrier added in TLStreamCommit to ensure data written to memory
 	 * before CB write point is updated before consumption by the reader.
 	 */
-	IMG_CHAR pszBufferLabel[PRVSRVTL_MAX_STREAM_NAME_SIZE + 20];
+	IMG_CHAR pszBufferLabel[PVRSRVTL_MAX_STREAM_NAME_SIZE + 20];
 	PVRSRV_MEMALLOCFLAGS_T uiMemFlags = PVRSRV_MEMALLOCFLAG_CPU_READABLE |
 	                                    PVRSRV_MEMALLOCFLAG_CPU_WRITEABLE |
 	                                    PVRSRV_MEMALLOCFLAG_GPU_READABLE |
 	                                    PVRSRV_MEMALLOCFLAG_CPU_UNCACHED_WC |
 	                                    PVRSRV_MEMALLOCFLAG_KERNEL_CPU_MAPPABLE |
-	                                    PVRSRV_MEMALLOCFLAG_PHYS_HEAP_HINT(CPU_LOCAL); /* TL for now is only used by host driver, so cpulocal mem suffices */
+	                                    PVRSRV_MEMALLOCFLAG_PHYS_HEAP_HINT(CPU_LOCAL) |  /* TL for now is only used by host driver, so cpulocal mem suffices */
+	                                    PVRSRV_MEMALLOCFLAG_ZERO_ON_ALLOC;
 
 	/* Exit if memory has already been allocated. */
 	if (psStream->pbyBuffer != NULL)
@@ -164,11 +171,11 @@ PVRSRV_ERROR TLAllocSharedMemIfNull(IMG_HANDLE hStream)
 	OSSNPrintf(pszBufferLabel, sizeof(pszBufferLabel), "TLStreamBuf-%s",
 	           psStream->szName);
 
-
 	/* Use HostMemDeviceNode instead of psStream->psDevNode to benefit from faster
-	 * accesses to CPU local memory. When the framework to access CPU_LOCAL device
-	 * memory from GPU is fixed, we'll switch back to use psStream->psDevNode for
-	 * TL buffers */
+	 * accesses to CPU local OS memory. Not all systems have a CPU_LOCAL heap so make use
+	 * of the internal HostMemDeviceNode instead to get a stream buffer held in
+	 * system memory since the GPU does not access these currently.
+	 */
 	eError = DevmemAllocateExportable((IMG_HANDLE)PVRSRVGetPVRSRVData()->psHostMemDeviceNode,
 	                                  (IMG_DEVMEM_SIZE_T) psStream->ui32Size,
 	                                  (IMG_DEVMEM_ALIGN_T) OSGetPageSize(),
@@ -225,6 +232,8 @@ TLStreamCreate(IMG_HANDLE *phStream,
                IMG_UINT32 ui32StreamFlags,
                TL_STREAM_ONREADEROPENCB pfOnReaderOpenCB,
                void *pvOnReaderOpenUD,
+               TL_STREAM_ONREADERCLOSECB pfOnReaderCloseCB,
+               void *pvOnReaderCloseUD,
                TL_STREAM_SOURCECB pfProducerCB,
                void *pvProducerUD)
 {
@@ -241,7 +250,7 @@ TLStreamCreate(IMG_HANDLE *phStream,
 		PVR_DPF_RETURN_RC(PVRSRV_ERROR_INVALID_PARAMS);
 	}
 	if (szStreamName == NULL || *szStreamName == '\0' ||
-	    OSStringLength(szStreamName) >= PRVSRVTL_MAX_STREAM_NAME_SIZE)
+	    OSStringLength(szStreamName) >= PVRSRVTL_MAX_STREAM_NAME_SIZE)
 	{
 		PVR_DPF_RETURN_RC(PVRSRV_ERROR_INVALID_PARAMS);
 	}
@@ -273,7 +282,7 @@ TLStreamCreate(IMG_HANDLE *phStream,
 		goto e0;
 	}
 
-	OSStringLCopy(psTmp->szName, szStreamName, PRVSRVTL_MAX_STREAM_NAME_SIZE);
+	OSStringSafeCopy(psTmp->szName, szStreamName, PVRSRVTL_MAX_STREAM_NAME_SIZE);
 
 	if (ui32StreamFlags & TL_FLAG_FORCE_FLUSH)
 	{
@@ -306,8 +315,10 @@ TLStreamCreate(IMG_HANDLE *phStream,
 
 	psTmp->pfOnReaderOpenCallback = pfOnReaderOpenCB;
 	psTmp->pvOnReaderOpenUserData = pvOnReaderOpenUD;
+	psTmp->pfOnReaderCloseCallback = pfOnReaderCloseCB;
+	psTmp->pvOnReaderCloseUserData = pvOnReaderCloseUD;
 	/* Remember producer supplied CB and data for later */
-	psTmp->pfProducerCallback = (void(*)(void))pfProducerCB;
+	psTmp->pfProducerCallback = pfProducerCB;
 	psTmp->pvProducerUserData = pvProducerUD;
 
 	psTmp->psNotifStream = NULL;
@@ -357,6 +368,21 @@ TLStreamCreate(IMG_HANDLE *phStream,
 	 * (i.e. this context's reference) */
 	psn->uiWRefCount = 1;
 
+	if (TL_HAS_DEFERRED_FREE(TLGGD()->uiTLDeferredFrees))
+	{
+		psn->uiWRefCount = 2;	/* We have a DeferredFree consumer present too,
+		                         * so bump the Write reference count to prevent
+		                         * premature closure.
+		                         */
+	}
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	PVR_DPF((PVR_DBG_WARNING,
+	         "%s: Stream '%s' RefCounts = [{%p}, %d, {%p}, %d]",
+	         __func__, psTmp->szName, &psTmp->i32RefCount, psTmp->i32RefCount,
+	        &psn->i32RefCount, psn->i32RefCount));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
 	TLAddStreamNode(psn);
 
 	/* Release TL_GLOBAL_DATA lock as the new TL_SNODE is now added to the list */
@@ -394,6 +420,8 @@ e0:
 void TLStreamReset(IMG_HANDLE hStream)
 {
 	PTL_STREAM psStream = (PTL_STREAM) hStream;
+	IMG_HANDLE hEventWaitForWriterToComplete;
+	PVRSRV_ERROR eError;
 
 	PVR_ASSERT(psStream != NULL);
 
@@ -401,20 +429,25 @@ void TLStreamReset(IMG_HANDLE hStream)
 
 	while (psStream->ui32Pending != NOTHING_PENDING)
 	{
-		PVRSRV_ERROR eError;
-
 		/* We're in the middle of a write so we cannot reset the stream.
 		 * We are going to wait until the data is committed. Release lock while
 		 * we're here. */
 		OSLockRelease(psStream->hStreamWLock);
 
+		eError = OSEventObjectOpen(psStream->psNode->hReadEventObj,
+		                           &hEventWaitForWriterToComplete);
+		PVR_LOG_RETURN_VOID_IF_ERROR(eError, "OSEventObjectOpen");
+
 		/* Event when psStream->bNoSignalOnCommit is set we can still use
 		 * the timeout capability of event object API (time in us). */
-		eError = OSEventObjectWaitTimeout(psStream->psNode->hReadEventObj, 100);
+		eError = OSEventObjectWaitTimeout(hEventWaitForWriterToComplete, 100);
 		if (eError != PVRSRV_ERROR_TIMEOUT && eError != PVRSRV_OK)
 		{
-			PVR_LOG_RETURN_VOID_IF_ERROR(eError, "OSEventObjectWaitTimeout");
+			PVR_LOG_GOTO_IF_ERROR(eError, "OSEventObjectWaitTimeout", TimeoutError);
 		}
+
+		eError = OSEventObjectClose(hEventWaitForWriterToComplete);
+		PVR_LOG_RETURN_VOID_IF_ERROR(eError, "OSEventObjectClose");
 
 		OSLockAcquire(psStream->hStreamWLock);
 
@@ -431,6 +464,12 @@ void TLStreamReset(IMG_HANDLE hStream)
 	/* we know that ui32Pending already has correct value (no need to set) */
 
 	OSLockRelease(psStream->hStreamWLock);
+
+	return;
+
+TimeoutError:
+	eError = OSEventObjectClose(hEventWaitForWriterToComplete);
+	PVR_LOG_IF_ERROR(eError, "OSEventObjectClose");
 }
 
 PVRSRV_ERROR
@@ -534,7 +573,7 @@ TLStreamOpen(IMG_HANDLE     *phStream,
 	}
 
 	if (psTmpSNode->psStream->psNotifStream != NULL &&
-	    psTmpSNode->uiWRefCount == 1)
+	    (psTmpSNode->uiWRefCount >= 1))
 	{
 		TLStreamMarkStreamOpen(psTmpSNode->psStream);
 	}
@@ -544,6 +583,35 @@ TLStreamOpen(IMG_HANDLE     *phStream,
 	 * this node from the TL_GLOBAL_DATA list. Hence, is protected using the
 	 * TL_GLOBAL_DATA lock and not TL_STREAM lock */
 	psTmpSNode->uiWRefCount++;
+
+	/* Increase the refcount of the Stream and the newly created SNode as we
+	 * have a top-level consumer present.
+	 */
+	if (TL_HAS_DEFERRED_FREE(TLGGD()->uiTLDeferredFrees))
+	{
+		psTmpSNode->psStream->i32RefCount++;	/* Stream RefCount */
+		psTmpSNode->i32RefCount++;				/* SNode RefCount */
+
+		psTmpSNode->uiWRefCount++;				/* SNode WRefCount */
+		if (psTmpSNode->psRDesc)
+		{
+			psTmpSNode->psRDesc->uiRefCount++;
+		}
+		if (psTmpSNode->psWDesc)
+		{
+			psTmpSNode->psWDesc->uiRefCount++;
+		}
+
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		PVR_DPF((PVR_DBG_WARNING,
+		         "%s: Stream '%s', RefCounts = {%p}, %d, {%p}, %d",
+		         __func__, psTmpSNode->psStream->szName,
+		         &psTmpSNode->psStream->i32RefCount,
+		         psTmpSNode->psStream->i32RefCount,
+		         &psTmpSNode->i32RefCount, psTmpSNode->i32RefCount));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+	}
 
 	OSLockRelease (TLGGD()->hTLGDLock);
 
@@ -574,8 +642,87 @@ TLStreamClose(IMG_HANDLE hStream)
 	 * in-case this TL_STREAM node is to be deleted */
 	OSLockAcquire (TLGGD()->hTLGDLock);
 
-	/* Decrement write reference counter of the stream */
-	psTmp->psNode->uiWRefCount--;
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	PVR_DPF((PVR_DBG_WARNING, "%s: Close '%s'", __func__,
+	         psTmp ? psTmp->szName : "*** UNKNOWN ***"));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+	/* Short-circuit this close if we're running with a DeferredFree stream as a
+	 * consumer and we have not reached the uiRefCount minimum associated with
+	 * this stream. Only do this extra check when there is a DeferredFree stream
+	 * present to consume the data. The final close happens when we enter
+	 * with a ref-count of 1.
+	 * To handle the correct writer dereferencing and closing of client apps
+	 * which have finished (uiWRefCount == 1) we need to do all of the normal
+	 * close but not destroy the stream as the consumer application will still
+	 * want to access any queued data which is present in the RDesc...WDesc
+	 * buffer.
+	 */
+
+	if (TL_HAS_DEFERRED_FREE(TLGGD()->uiTLDeferredFrees))
+	{
+		IMG_BOOL bShortCircuit = IMG_FALSE;
+
+		if (psTmp->i32RefCount > 1)
+		{
+			psTmp->i32RefCount--;
+			bShortCircuit = IMG_TRUE;
+		}
+		if (psTmp->psNode->i32RefCount > 1)
+		{
+			psTmp->psNode->i32RefCount--;
+			bShortCircuit = IMG_TRUE;
+		}
+
+		if (bShortCircuit)
+		{
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+			PVR_DPF((PVR_DBG_WARNING,
+			         "%s: Short-circuit close =DeferredFree '%s' has {%d, %d} refs"
+			         ", WriteRef [%x]",
+			         __func__, psTmp->szName, psTmp->i32RefCount,
+			         psTmp->psNode->i32RefCount, psTmp->psNode->uiWRefCount));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+			OSLockRelease (TLGGD()->hTLGDLock);
+			psTmp->bAsyncClose = IMG_TRUE;
+			PVR_DPF_RETURN;
+		}
+	}
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	else
+	{
+		PVR_DPF((PVR_DBG_WARNING,
+		         "%s: !DeferredFree close =DeferredFree '%s' has {%d, %d} refs"
+				 ", WriteRef [%x]",
+		         __func__, psTmp->szName, psTmp->i32RefCount,
+		         psTmp->psNode->i32RefCount, psTmp->psNode->uiWRefCount));
+
+		PVR_DPF((PVR_DBG_WARNING,
+		         "%s: !DeferredFree RDesc = [%x], WDesc = [%x]", __func__,
+		         psTmp->psNode->psRDesc ? psTmp->psNode->psRDesc->uiRefCount : 0,
+		         psTmp->psNode->psWDesc ? psTmp->psNode->psWDesc->uiRefCount : 0));
+	}
+
+
+	PVR_DPF((PVR_DBG_WARNING, "%s: RW = <%s%s>", __func__,
+	         psTmp->psNode->psRDesc ? "R" : "-",
+	         psTmp->psNode->psWDesc ? "W" : "-"));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
+	if (!psTmp->bAsyncClose)
+	{
+		/* Decrement write reference counter of the stream */
+		if (psTmp->psNode->uiWRefCount != 0U)
+		{
+			psTmp->psNode->uiWRefCount--;
+		}
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+		else
+		{
+			PVR_DPF((PVR_DBG_WARNING, "%s: uiWRefCount already 0!", __func__));
+		}
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+	}
 
 	if (0 != psTmp->psNode->uiWRefCount)
 	{
@@ -585,9 +732,19 @@ TLStreamClose(IMG_HANDLE hStream)
 		/* uiWRefCount == 1 means that stream was closed for write. Next
 		 * close is pairing TLStreamCreate(). Send notification to indicate
 		 * that no writer are connected to the stream any more. */
-		if (psTmp->psNotifStream != NULL && psTmp->psNode->uiWRefCount == 1)
+		if (TL_HAS_DEFERRED_FREE(TLGGD()->uiTLDeferredFrees))
 		{
-			TLStreamMarkStreamClose(psTmp);
+			if (psTmp->psNotifStream != NULL && psTmp->psNode->uiWRefCount == 2)
+			{
+				TLStreamMarkStreamClose(psTmp);
+			}
+		}
+		else
+		{
+			if (psTmp->psNotifStream != NULL && psTmp->psNode->uiWRefCount == 1)
+			{
+				TLStreamMarkStreamClose(psTmp);
+			}
 		}
 
 		OSLockRelease (TLGGD()->hTLGDLock);
@@ -629,6 +786,10 @@ TLStreamClose(IMG_HANDLE hStream)
 		if (bDestroyStream)
 		{
 			/* Destroy the stream if it was removed from TL_GLOBAL_DATA */
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+			PVR_DPF((PVR_DBG_WARNING, "%s: Destroying '%s'", __func__,
+			         psTmp->szName));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
 			TLStreamDestroy (psTmp);
 			psTmp = NULL;
 		}
@@ -1240,7 +1401,7 @@ TLStreamMarkEOS(IMG_HANDLE psStream, IMG_BOOL bRemoveOld)
 	}
 	else
 	{
-	eError = DoTLStreamReserve(psStream, &pData, 0, 0, PVRSRVTL_PACKETTYPE_MARKER_EOS, NULL, NULL);
+		eError = DoTLStreamReserve(psStream, &pData, 0, 0, PVRSRVTL_PACKETTYPE_MARKER_EOS, NULL, NULL);
 	}
 
 	if (PVRSRV_OK != eError)
@@ -1446,7 +1607,7 @@ TLStreamAcquireReadPos(PTL_STREAM psStream,
 		PVRSRV_ERROR eRc;
 		IMG_UINT32   ui32Resp = 0;
 
-		eRc = ((TL_STREAM_SOURCECB)psStream->pfProducerCallback)(psStream, TL_SOURCECB_OP_CLIENT_EOS,
+		eRc = psStream->pfProducerCallback(psStream, TL_SOURCECB_OP_CLIENT_EOS,
 				&ui32Resp, psStream->pvProducerUserData);
 		PVR_LOG_IF_ERROR(eRc, "TLStream->pfProducerCallback");
 
@@ -1604,6 +1765,13 @@ TLStreamDestroy (PTL_STREAM psStream)
 {
 	PVR_ASSERT (psStream);
 
+#if defined(PVR_DPF_FUNCTION_TRACE_ON)
+	PVR_DPF((PVR_DBG_WARNING, "%s: Destroying '%s' - refCnt = {0x%x, 0x%x}",
+	         __func__,
+	         psStream->szName, psStream->i32RefCount,
+	         psStream->psNode->i32RefCount));
+#endif	/* PVR_DPF_FUNCTION_TRACE_ON */
+
 	OSLockDestroy (psStream->hStreamWLock);
 	OSLockDestroy (psStream->hReadLock);
 
@@ -1622,4 +1790,44 @@ TLStreamGetBufferPointer(PTL_STREAM psStream)
 	PVR_ASSERT(psStream);
 
 	PVR_DPF_RETURN_VAL(psStream->psStreamMemDesc);
+}
+
+/*
+ * Determine the maximum transfer size which will fit into the specified
+ * L2 consumer stream.
+ * This is a point-in-time snapshot which compares the given requested transfer
+ * size and returns the minimum of that vs the available buffer space within
+ * the L2 stream. This is the largest amount of data that can be successfully
+ * copied in the stream without truncation occurring.
+ * Worst-case scenario is that we copy fewer bytes than the maximum
+ * actually available, but we will never copy too much data.
+ */
+IMG_UINT32
+TLStreamGetMaxTransfer(IMG_UINT32 uiXferSize, IMG_HANDLE hConsumerStream)
+{
+	PTL_STREAM  psConsumer = (PTL_STREAM)hConsumerStream;
+	IMG_UINT32  ui32MaxTransfer = 0U;
+
+	IMG_UINT32  ui32Xfer;
+
+	/* Local copies */
+	IMG_UINT32	ui32Read = psConsumer->ui32Read;
+	IMG_UINT32	ui32Write = psConsumer->ui32Write;
+
+	if (ui32Write >= ui32Read)
+	{
+		/* Can transfer Write .. End-of-buffer + Read bytes at start */
+		ui32Xfer = psConsumer->ui32Size - ui32Write + ui32Read;
+	}
+	else
+	{
+		/* Can transfer Read - Write bytes maximum */
+		ui32Xfer = ui32Read - ui32Write;
+	}
+
+	PVR_ASSERT(ui32Xfer <= psConsumer->ui32Size);
+
+	ui32MaxTransfer = MIN(ui32Xfer, uiXferSize);
+
+	return ui32MaxTransfer;
 }

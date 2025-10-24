@@ -51,6 +51,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxdevice.h"
 #include "rgx_bridge.h"
 #include "fwload.h"
+#include "rgxinit_apphints.h"
 
 #if defined(__linux__)
 #define OS_FW_VERIFY_FUNCTION OSVerifyFirmware
@@ -73,9 +74,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ******************************************************************************/
 PVRSRV_ERROR RGXInitDevPart2 (PVRSRV_DEVICE_NODE	*psDeviceNode,
-							  IMG_UINT32			ui32DeviceFlags,
-							  IMG_UINT32			ui32HWPerfHostFilter,
-							  RGX_ACTIVEPM_CONF		eActivePMConf);
+							  RGX_INIT_APPHINTS		*psApphints);
 
 PVRSRV_ERROR RGXInitAllocFWImgMem(PVRSRV_DEVICE_NODE   *psDeviceNode,
                                   IMG_DEVMEM_SIZE_T    ui32FWCodeLen,
@@ -100,20 +99,8 @@ PVRSRV_ERROR RGXInitAllocFWImgMem(PVRSRV_DEVICE_NODE   *psDeviceNode,
 ******************************************************************************/
 PVRSRV_ERROR
 RGXInitFirmware(PVRSRV_DEVICE_NODE       *psDeviceNode,
-                IMG_BOOL                 bEnableSignatureChecks,
-                IMG_UINT32               ui32SignatureChecksBufSize,
-                IMG_UINT32               ui32HWPerfFWBufSizeKB,
-                IMG_UINT64               ui64HWPerfFilter,
+                RGX_INIT_APPHINTS        *psApphints,
                 IMG_UINT32               ui32ConfigFlags,
-                IMG_UINT32               ui32LogType,
-                IMG_UINT32               ui32FilterFlags,
-                IMG_UINT32               ui32JonesDisableMask,
-                IMG_UINT32               ui32HWRDebugDumpLimit,
-                IMG_UINT32               ui32HWPerfCountersDataSize,
-                IMG_UINT32               *pui32TPUTrilinearFracMask,
-                RGX_RD_POWER_ISLAND_CONF eRGXRDPowerIslandingConf,
-                FW_PERF_CONF             eFirmwarePerf,
-                IMG_UINT32               ui32KCCBSizeLog2,
                 IMG_UINT32               ui32ConfigFlagsExt,
                 IMG_UINT32               ui32FwOsCfgFlags);
 
@@ -131,8 +118,6 @@ RGXInitFirmware(PVRSRV_DEVICE_NODE       *psDeviceNode,
 
  @Input ppsRGXFW - fw pointer
 
- @Output ppbFWData - pointer to FW data (NULL if an error occurred)
-
  @Return PVRSRV_ERROR - PVRSRV_OK on success
                         PVRSRV_ERROR_NOT_READY if filesystem is not ready
                         PVRSRV_ERROR_NOT_FOUND if no suitable FW image found
@@ -141,8 +126,7 @@ RGXInitFirmware(PVRSRV_DEVICE_NODE       *psDeviceNode,
 
 ******************************************************************************/
 PVRSRV_ERROR RGXLoadAndGetFWData(PVRSRV_DEVICE_NODE *psDeviceNode,
-                                 OS_FW_IMAGE **ppsRGXFW,
-                                 const IMG_BYTE **ppbFWData);
+                                 OS_FW_IMAGE **ppsRGXFW);
 
 #if defined(PDUMP)
 /*!
@@ -215,44 +199,29 @@ PVRSRV_ERROR DevDeInitRGX(PVRSRV_DEVICE_NODE *psDeviceNode);
 
 void RGX_WaitForInterruptsTimeout(PVRSRV_RGXDEV_INFO *psDevInfo);
 
-/*!
-*******************************************************************************
-
- @Function     SORgxGpuUtilStatsRegister
-
- @Description  SO Interface function called from the OS layer implementation.
-               Initialise data used to compute GPU utilisation statistics
-               for a particular user (identified by the handle passed as
-               argument). This function must be called only once for each
-               different user/handle.
-
- @Input        phGpuUtilUser - Pointer to handle used to identify a user of
-                               RGXGetGpuUtilStats
-
- @Return       PVRSRV_ERROR
-
-******************************************************************************/
-PVRSRV_ERROR SORgxGpuUtilStatsRegister(IMG_HANDLE *phGpuUtilUser);
-
-
-/*!
-*******************************************************************************
-
- @Function     SORgxGpuUtilStatsUnregister
-
- @Description  SO Interface function called from the OS layer implementation.
-               Free data previously used to compute GPU utilisation statistics
-               for a particular user (identified by the handle passed as
-               argument).
-
- @Input        hGpuUtilUser - Handle used to identify a user of
-                              RGXGetGpuUtilStats
-
- @Return       PVRSRV_ERROR
-
-******************************************************************************/
-PVRSRV_ERROR SORgxGpuUtilStatsUnregister(IMG_HANDLE hGpuUtilUser);
 #endif /* !defined(NO_HARDWARE) */
+
+#if defined(RGX_FEATURE_AXI_ACE_BIT_MASK)
+/*!
+************************************************************************************
+ @Function		RGXSystemGetFabricCoherency
+
+ @Description	Get the system fabric coherency for the device by reading default
+				configuration from device register, subject to AppHint overrides.
+
+ @Input			sRegsCpuPBase		: Device register CPU physical address base
+				ui32RegsSize		: Device register size
+				peDevFabricType		: Device memory bus fabric type
+				peCacheSnoopingMode : Fabric coherency override
+
+ @Return		PVRSRV_ERROR
+************************************************************************************/
+PVRSRV_ERROR RGXSystemGetFabricCoherency(PVRSRV_DEVICE_CONFIG *psDeviceConfig,
+										 IMG_CPU_PHYADDR sRegsCpuPBase,
+										 IMG_UINT32 ui32RegsSize,
+										 PVRSRV_DEVICE_FABRIC_TYPE *peDevFabricType,
+										 PVRSRV_DEVICE_SNOOP_MODE *peCacheSnoopingMode);
+#endif
 
 /*!
  *******************************************************************************
@@ -277,5 +246,31 @@ PVRSRV_ERROR RGXInitCreateFWKernelMemoryContext(PVRSRV_DEVICE_NODE *psDeviceNode
  @Input         psDeviceNode  device node
  ******************************************************************************/
 void RGXDeInitDestroyFWKernelMemoryContext(PVRSRV_DEVICE_NODE *psDeviceNode);
+
+/*!
+ *******************************************************************************
+
+ @Function      RGXHeapDerivePageSize
+
+ @Description   Ensure the desire page size is suitable for the RGX hardware
+
+ @Input         uiLog2PageSize target page log2 size
+
+ @Return        IMG_UINT32 valid page log2 size
+ ******************************************************************************/
+IMG_UINT32 RGXHeapDerivePageSize(IMG_UINT32 uiLog2PageSize);
+
+/*!
+ *******************************************************************************
+
+ @Function      RGXGetNon4KHeapPageShift
+
+ @Description   Retrieves the log2 page size of the General non 4k heap
+
+ @Output        pui32Log2Non4KPgShift page shift
+ ******************************************************************************/
+PVRSRV_ERROR RGXGetNon4KHeapPageShift(const void *hPrivate,
+                                     IMG_UINT32 *pui32Log2Non4KPgShift);
+
 
 #endif /* RGXINIT_H */

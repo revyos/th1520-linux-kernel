@@ -69,7 +69,7 @@ typedef struct {
  *****************************************************************************/
 #define RGXKM_DEVICE_STATE_ZERO_FREELIST                          (0x1)  /*!< Zeroing the physical pages of reconstructed free lists */
 #define RGXKM_DEVICE_STATE_DISABLE_DW_LOGGING_EN                  (0x2)  /*!< Used to disable the Devices Watchdog logging */
-#define RGXKM_DEVICE_STATE_GPU_UNITS_POWER_CHANGE_EN              (0x4)  /*!< Used for validation to inject dust requests every TA/3D kick */
+#define RGXKM_DEVICE_STATE_GPU_UNITS_POWER_CHANGE_EN              (0x4)  /*!< Used for validation to inject power units state change every DM kick */
 #define RGXKM_DEVICE_STATE_CCB_GROW_EN                            (0x8)  /*!< Used to indicate CCB grow is permitted */
 #define RGXKM_DEVICE_STATE_ENABLE_SPU_UNITS_POWER_MASK_CHANGE_EN  (0x10) /*!< Used for validation to enable SPU power state mask change */
 #define RGXKM_DEVICE_STATE_MASK                                   (0x1F)
@@ -97,13 +97,33 @@ typedef struct {
 #define RGX_GPU_DVFS_TRANSITION_CALIBRATION_TIME_US  150000    /* Time required for a recalibration after a DVFS transition */
 #define RGX_GPU_DVFS_PERIODIC_CALIBRATION_TIME_US    10000000  /* Time before the next periodic calibration and correlation */
 
+
 /*!
  ******************************************************************************
  * Global flags for driver validation
  *****************************************************************************/
-#define RGX_VAL_KZ_SIG_CHECK_NOERR_EN            (0x10U)  /*!< Enable KZ signature check. Signatures must match */
-#define RGX_VAL_KZ_SIG_CHECK_ERR_EN              (0x20U)  /*!< Enable KZ signature check. Signatures must not match */
-#define RGX_VAL_SIG_CHECK_ERR_EN                 (0U)     /*!< Not supported on Rogue cores */
+#define RGX_VAL_FBDC_SIG_CHECK_NOERR_EN           (0x2U)  /*!< Enable FBDC signature check. Signatures must match */
+#define RGX_VAL_FBDC_SIG_CHECK_ERR_EN             (0x4U)  /*!< Enable FBDC signature check. Signatures must not match */
+#define RGX_VAL_GPUSTATEPIN_EN                    (0x8U)  /*!< Enable GPU state pin check */
+#define RGX_VAL_WGP_SIG_CHECK_NOERR_EN           (0x10U)  /*!< Enable WGP signature check. Signatures must match */
+#define RGX_VAL_WGP_SIG_CHECK_ERR_EN             (0x20U)  /*!< Enable WGP signature check. Signatures must not match */
+#define RGX_VAL_TRP_SIG_CHECK_NOERR_EN           (0x40U)  /*!< Enable TRP signature check. Signatures must match */
+#define RGX_VAL_TRP_SIG_CHECK_ERR_EN             (0x80U)  /*!< Enable TRP signature check. Signatures must not match */
+
+/*!
+ ******************************************************************************
+ * HWPerf L2 Stream ID type definition.
+ *****************************************************************************/
+typedef IMG_UINT32 RGX_HWPERF_L2_STREAM_ID;
+/* HWPerf stream for Client HWPerf access. */
+#define RGX_HWPERF_L2_STREAM_HWPERF 0U
+#if (defined(__linux__) && !defined(__QNXNTO__) && !defined(INTEGRITY_OS))
+/* HWPerf stream for FTrace HWPerf access. */
+#define RGX_HWPERF_L2_STREAM_FTRACE 1U
+#define RGX_HWPERF_L2_STREAM_LAST   2U
+#else
+#define RGX_HWPERF_L2_STREAM_LAST   1U
+#endif
 
 typedef struct _GPU_FREQ_TRACKING_DATA_
 {
@@ -121,12 +141,16 @@ typedef struct
 {
 	IMG_UINT64 ui64BeginCRTimestamp;
 	IMG_UINT64 ui64BeginOSTimestamp;
+	IMG_UINT64 ui64BeginSOCTimestamp;
 
 	IMG_UINT64 ui64EndCRTimestamp;
 	IMG_UINT64 ui64EndOSTimestamp;
+	IMG_UINT64 ui64EndSOCTimestamp;
 
 	IMG_UINT32 ui32EstCoreClockSpeed;
 	IMG_UINT32 ui32CoreClockSpeed;
+
+	IMG_UINT32 ui32EstSOCClockSpeed;
 } GPU_FREQ_TRACKING_HISTORY;
 #endif
 
@@ -135,10 +159,12 @@ typedef struct _RGX_GPU_DVFS_TABLE_
 	/* Beginning of current calibration period (in us) */
 	IMG_UINT64 ui64CalibrationCRTimestamp;
 	IMG_UINT64 ui64CalibrationOSTimestamp;
+	IMG_UINT64 ui64CalibrationSOCTimestamp;
 
 	/* Calculated calibration period (in us) */
 	IMG_UINT64 ui64CalibrationCRTimediff;
 	IMG_UINT64 ui64CalibrationOSTimediff;
+	IMG_UINT64 ui64CalibrationSOCTimediff;
 
 	/* Current calibration period (in us) */
 	IMG_UINT32 ui32CalibrationPeriod;
@@ -147,6 +173,9 @@ typedef struct _RGX_GPU_DVFS_TABLE_
 	IMG_UINT32 ui32FreqIndex;
 	IMG_UINT32 aui32GPUFrequency[RGX_GPU_DVFS_TABLE_SIZE];
 	GPU_FREQ_TRACKING_DATA asTrackingData[RGX_GPU_DVFS_TABLE_SIZE];
+
+	/* SOC frequency for synchronizing events between the host and GPU */
+	IMG_UINT32 ui32EstSOCClockSpeed;
 
 #if defined(PVRSRV_TIMER_CORRELATION_HISTORY)
 	IMG_UINT32 ui32HistoryIndex;
@@ -160,17 +189,28 @@ typedef struct _RGX_GPU_DVFS_TABLE_
  * GPU utilisation statistics
  *****************************************************************************/
 
-typedef struct _RGXFWIF_GPU_UTIL_STATS_
+typedef struct _RGX_GPU_UTIL_STATS_
 {
-	IMG_BOOL   bValid;                /* If TRUE, statistics are valid.
-	                                     FALSE if the driver couldn't get reliable stats. */
-	IMG_UINT64 ui64GpuStatActive;     /* GPU active statistic */
-	IMG_UINT64 ui64GpuStatBlocked;    /* GPU blocked statistic */
-	IMG_UINT64 ui64GpuStatIdle;       /* GPU idle statistic */
-	IMG_UINT64 ui64GpuStatCumulative; /* Sum of active/blocked/idle stats */
-	IMG_UINT64 ui64TimeStamp;         /* Timestamp of the most recent sample of the GPU stats */
-} RGXFWIF_GPU_UTIL_STATS;
+	POS_SPINLOCK hSpinlock;                 /*!< Spinlock ensuring utilisation data can be handled from an interrupt context */
 
+	IMG_UINT64 ui64LastCheckTimestampNS;    /*!< Timestamp in nanoseconds of the last utilisation check */
+	IMG_UINT64 ui64LastCheckTimestampTicks; /*!< Timestamp in timer ticks of the last utilisation check */
+
+	/* Basic GPU usage statistics */
+	IMG_BOOL   bBasicStatsValid;          /*!< Boolean indicating if the current sample of basic utilisation data is valid */
+	IMG_UINT64 ui64LastGpuActiveTimeNS;   /*!< Total sum of nanoseconds the GPU spent in active state at the previous utilisation check */
+	IMG_UINT64 ui64GpuActivePeriodNS;     /*!< Time in nanoseconds the GPU spent in active state during the last measurement period */
+	IMG_UINT64 ui64MeasurementPeriodNS;   /*!< Length of last measurement period: nanoseconds elapsed since previous utilisation check */
+	IMG_UINT32 ui32GpuUsage;              /*!< Percentage of real time the GPU was active since last check */
+
+	/* Detailed GPU usage statistics */
+	IMG_BOOL   bDetailedStatsValid;                                                                      /*!< Boolean indicating if the current sample of detailed utilisation data is valid */
+	IMG_UINT32 RGXFW_ALIGN aaui32DmActiveTimeTicksCurrent[RGXFWIF_GPU_UTIL_DM_MAX][RGXFW_MAX_NUM_OSIDS]; /*!< Current snapshot of the accumulated timer ticks DMs spent in active state on behalf of each DriverID */
+	IMG_UINT32 RGXFW_ALIGN aaui32DmActiveTimeTicksPrev[RGXFWIF_GPU_UTIL_DM_MAX][RGXFW_MAX_NUM_OSIDS];    /*!< Previous snapshot of the accumulated timer ticks DMs spent in active state on behalf of each DriverID */
+	IMG_UINT64 ui64MeasurementPeriodTicks;                                                               /*!< Length of last measurement period: timer ticks elapsed since previous utilisation check */
+	IMG_UINT32 aaui32DriverDmUsage[RGXFWIF_GPU_UTIL_DM_MAX][RGXFW_MAX_NUM_OSIDS];                        /*!< Percentage of timer ticks each DM was used by every DriverID since the last check */
+
+} RGX_GPU_UTIL_STATS;
 
 typedef struct _RGX_REG_CONFIG_
 {
@@ -182,24 +222,21 @@ typedef struct _RGX_REG_CONFIG_
 
 typedef struct _PVRSRV_STUB_PBDESC_ PVRSRV_STUB_PBDESC;
 
-typedef struct
-{
-	IMG_UINT32			ui32DustCount1;
-	IMG_UINT32			ui32DustCount2;
-	IMG_BOOL			bToggle;
-} RGX_DUST_STATE;
 
 typedef struct _PVRSRV_DEVICE_FEATURE_CONFIG_
 {
 	IMG_UINT64 ui64ErnsBrns;
-	IMG_UINT64 ui64Features;
+	const IMG_UINT64 *paui64Features;
 	IMG_UINT32 ui32B;
 	IMG_UINT32 ui32V;
 	IMG_UINT32 ui32N;
 	IMG_UINT32 ui32C;
 	IMG_UINT32 ui32FeaturesValues[RGX_FEATURE_WITH_VALUES_MAX_IDX];
 	IMG_UINT32 ui32MAXDMCount;
-	IMG_UINT32 ui32MAXDustCount;
+	IMG_UINT32 ui32MAXPowUnitCount;
+#if defined(RGX_FEATURE_RAY_TRACING_ARCH_MAX_VALUE_IDX)
+	IMG_UINT32 ui32MAXRACCount;
+#endif
 	IMG_UINT32 ui32SLCSizeInBytes;
 	IMG_PCHAR  pszBVNCString;
 }PVRSRV_DEVICE_FEATURE_CONFIG;
@@ -215,7 +252,7 @@ typedef struct _PVRSRV_DEVICE_FEATURE_CONFIG_
 
 /* This is used to check if the Boolean feature (e.g. WITHOUT an integer value) is available for the currently running BVNC or not */
 #define RGX_IS_FEATURE_SUPPORTED(psDevInfo, Feature) \
-			BITMASK_HAS(psDevInfo->sDevFeatureCfg.ui64Features, RGX_FEATURE_##Feature##_BIT_MASK)
+			BITMASK_HAS(psDevInfo->sDevFeatureCfg.paui64Features[RGX_FEATURE_##Feature##_ARRAY_INDEX], RGX_FEATURE_##Feature##_BIT_MASK)
 
 /* This is used to check if the ERN is available for the currently running BVNC or not */
 #define RGX_IS_ERN_SUPPORTED(psDevInfo, ERN) \
@@ -273,6 +310,15 @@ typedef union _RGX_WORKLOAD_
 		IMG_UINT32				ui32Characteristic1;
 		IMG_UINT32				ui32Characteristic2;
 	} sTransfer;
+
+#if defined(RGX_FEATURE_RAY_TRACING_ARCH_MAX_VALUE_IDX)
+	struct
+	{
+		IMG_UINT32				ui32DispatchSize;
+		IMG_UINT32				ui32AccStructSize;
+	} sRay;
+#endif
+
 } RGX_WORKLOAD;
 
 /*!
@@ -323,6 +369,13 @@ typedef struct _WORKEST_HOST_DATA_
 		{
 			WORKLOAD_MATCHING_DATA	sDataTDM;	/*!< matching data for TDM-TQ commands */
 		} sTransfer;
+
+#if defined(RGX_FEATURE_RAY_TRACING_ARCH_MAX_VALUE_IDX)
+		struct
+		{
+			WORKLOAD_MATCHING_DATA	sDataRDM;	/*!< matching data for RDM commands */
+		} sRay;
+#endif
 	} uWorkloadMatchingData;
 
 	/*
@@ -352,6 +405,12 @@ typedef struct _WORKEST_RETURN_DATA_
 #endif
 
 
+#if defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+#define RGX_MAX_NUM_MMU_PAGE_SIZE_RANGES    4
+#endif
+
+
+#if defined(RGX_FEATURE_MIPS_BIT_MASK)
 typedef struct
 {
 #if defined(PDUMP)
@@ -360,6 +419,7 @@ typedef struct
 	PG_HANDLE       sPages;
 	IMG_DEV_PHYADDR sPhysAddr;
 } RGX_MIPS_ADDRESS_TRAMPOLINE;
+#endif
 
 
 /*!
@@ -371,6 +431,16 @@ typedef struct _PVRSRV_RGXDEV_ERROR_COUNTS_
 	IMG_UINT32 ui32WGPErrorCount;		/*!< count of the number of WGP checksum errors */
 	IMG_UINT32 ui32TRPErrorCount;		/*!< count of the number of TRP checksum errors */
 } PVRSRV_RGXDEV_ERROR_COUNTS;
+
+/*!
+ ******************************************************************************
+ * RGX Debug dump firmware trace log type
+ *****************************************************************************/
+typedef IMG_UINT32 RGX_FWT_LOGTYPE;
+#define RGX_FWT_LOGTYPE_NONE    0U
+#define RGX_FWT_LOGTYPE_BINARY  1U
+#define RGX_FWT_LOGTYPE_DECODED 2U
+#define RGX_FWT_LOGTYPE_PARTIAL 3U
 
 /*!
  ******************************************************************************
@@ -392,6 +462,11 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	/* Kernel mode linear address of device registers */
 	void __iomem			*pvRegsBaseKM;
 
+#if defined(RGX_FEATURE_HOST_SECURITY_VERSION_MAX_VALUE_IDX)
+	/* Kernel mode linear address of device registers */
+	void __iomem			*pvSecureRegsBaseKM;
+#endif
+
 	IMG_HANDLE				hRegMapping;
 
 	/* System physical address of device registers */
@@ -412,6 +487,7 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	/* Kernel CCB */
 	DEVMEM_MEMDESC			*psKernelCCBCtlMemDesc;      /*!< memdesc for Kernel CCB control */
 	RGXFWIF_CCB_CTL			*psKernelCCBCtl;             /*!< kernel mapping for Kernel CCB control */
+	RGXFWIF_CCB_CTL			*psKernelCCBCtlLocal;        /*!< cpu local copy of Kernel CCB control */
 	DEVMEM_MEMDESC			*psKernelCCBMemDesc;         /*!< memdesc for Kernel CCB */
 	IMG_UINT8				*psKernelCCB;                /*!< kernel mapping for Kernel CCB */
 	DEVMEM_MEMDESC			*psKernelCCBRtnSlotsMemDesc; /*!< Return slot array for Kernel CCB commands */
@@ -420,12 +496,14 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	/* Firmware CCB */
 	DEVMEM_MEMDESC			*psFirmwareCCBCtlMemDesc;   /*!< memdesc for Firmware CCB control */
 	RGXFWIF_CCB_CTL			*psFirmwareCCBCtl;          /*!< kernel mapping for Firmware CCB control */
+	RGXFWIF_CCB_CTL			*psFirmwareCCBCtlLocal;     /*!< cpu local copy of Firmware CCB control */
 	DEVMEM_MEMDESC			*psFirmwareCCBMemDesc;      /*!< memdesc for Firmware CCB */
 	IMG_UINT8				*psFirmwareCCB;             /*!< kernel mapping for Firmware CCB */
 
 	/* Workload Estimation Firmware CCB */
 	DEVMEM_MEMDESC			*psWorkEstFirmwareCCBCtlMemDesc;   /*!< memdesc for Workload Estimation Firmware CCB control */
 	RGXFWIF_CCB_CTL			*psWorkEstFirmwareCCBCtl;          /*!< kernel mapping for Workload Estimation Firmware CCB control */
+	RGXFWIF_CCB_CTL			*psWorkEstFirmwareCCBCtlLocal;     /*!< cpu local copy of Workload Estimation Firmware CCB control */
 	DEVMEM_MEMDESC			*psWorkEstFirmwareCCBMemDesc;      /*!< memdesc for Workload Estimation Firmware CCB */
 	IMG_UINT8				*psWorkEstFirmwareCCB;             /*!< kernel mapping for Workload Estimation Firmware CCB */
 
@@ -438,6 +516,11 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	PVRSRV_MEMALLOCFLAGS_T  uiFWPoisonOnFreeFlag;           /*!< Flag for poisoning FW allocations when freed */
 
 	IMG_BOOL				bIgnoreHWReportedBVNC;			/*!< Ignore BVNC reported by HW */
+
+    /* multicore configuration information */
+    IMG_UINT32              ui32MultiCoreNumCores;      /* total cores primary + secondaries. 0 for non-multi core */
+    IMG_UINT32              ui32MultiCorePrimaryId;     /* primary core id for this device */
+    IMG_UINT64             *pui64MultiCoreCapabilities; /* capabilities for each core */
 
 	/*
 		if we don't preallocate the pagetables we must
@@ -453,7 +536,10 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	IMG_UINT32			ui32FWCodeSizeInBytes;
 	DEVMEM_MEMDESC			*psRGXFWDataMemDesc;
 	IMG_DEV_VIRTADDR		sFWDataDevVAddrBase;
+
+#if defined(RGX_FEATURE_MIPS_BIT_MASK)
 	RGX_MIPS_ADDRESS_TRAMPOLINE	*psTrampoline;
+#endif
 
 	DEVMEM_MEMDESC			*psRGXFWCorememCodeMemDesc;
 	IMG_DEV_VIRTADDR		sFWCorememCodeDevVAddrBase;
@@ -473,8 +559,13 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	DEVMEM_MEMDESC			*psRGXFWSig3DChecksMemDesc;
 	IMG_UINT32				ui32Sig3DChecksSize;
 
-	DEVMEM_MEMDESC			*psRGXFWSigTDM2DChecksMemDesc;
-	IMG_UINT32				ui32SigTDM2DChecksSize;
+	DEVMEM_MEMDESC			*psRGXFWSigTDMChecksMemDesc;
+	IMG_UINT32				ui32SigTDMChecksSize;
+
+#if defined(RGX_FEATURE_RAY_TRACING_ARCH_MAX_VALUE_IDX)
+	DEVMEM_MEMDESC			*psRGXFWSigRDMChecksMemDesc;
+	IMG_UINT32				ui32SigRDMChecksSize;
+#endif
 
 	IMG_BOOL				bDumpedKCCBCtlAlready;
 
@@ -485,13 +576,15 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 
 	DEVMEM_MEMDESC			*psRGXFWIfTraceBufCtlMemDesc;						/*!< memdesc of trace buffer control structure */
 	DEVMEM_MEMDESC			*psRGXFWIfTraceBufferMemDesc[RGXFW_THREAD_NUM];		/*!< memdesc of actual FW trace (log) buffer(s) */
+	IMG_PUINT32				apui32TraceBuffer[RGXFW_THREAD_NUM];				/*!< Trace buffer address (Host address), to be used by host when reading from trace buffer */
+	IMG_UINT32				ui32TraceBufSizeInDWords;							/*!< CPU local copy of FW Trace buffer size in dwords */
 	RGXFWIF_TRACEBUF		*psRGXFWIfTraceBufCtl;								/*!< structure containing trace control data and actual trace buffer */
 
 	DEVMEM_MEMDESC			*psRGXFWIfFwSysDataMemDesc;							/*!< memdesc of the firmware-shared system data structure */
-	RGXFWIF_SYSDATA			*psRGXFWIfFwSysData;								/*!< structure containing trace control data and actual trace buffer */
+	RGXFWIF_SYSDATA			*psRGXFWIfFwSysData;								/*!< structure containing km-firmware shared system data */
 
 	DEVMEM_MEMDESC			*psRGXFWIfFwOsDataMemDesc;							/*!< memdesc of the firmware-shared os structure */
-	RGXFWIF_OSDATA			*psRGXFWIfFwOsData;									/*!< structure containing trace control data and actual trace buffer */
+	RGXFWIF_OSDATA			*psRGXFWIfFwOsData;									/*!< structure containing km-firmware shared os data */
 
 #if defined(SUPPORT_TBI_INTERFACE)
 	DEVMEM_MEMDESC			*psRGXFWIfTBIBufferMemDesc;							/*!< memdesc of actual FW TBI buffer */
@@ -504,12 +597,13 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	IMG_UINT32				ui32ClockSource;
 	IMG_UINT32				ui32LastClockSource;
 
-	DEVMEM_MEMDESC			*psRGXFWIfGpuUtilFWCbCtlMemDesc;
-	RGXFWIF_GPU_UTIL_FWCB	*psRGXFWIfGpuUtilFWCb;
+	DEVMEM_MEMDESC			*psRGXFWIfGpuUtilFWCtlMemDesc;
+	RGXFWIF_GPU_UTIL_FW     *psRGXFWIfGpuUtilFW;
 
 	DEVMEM_MEMDESC			*psRGXFWIfHWPerfBufMemDesc;
 	IMG_BYTE				*psRGXFWIfHWPerfBuf;
 	IMG_UINT32				ui32RGXFWIfHWPerfBufSize; /* in bytes */
+	IMG_UINT32				ui32RGXL2HWPerfBufSize;   /* in bytes */
 
 	DEVMEM_MEMDESC			*psRGXFWIfRegCfgMemDesc;
 
@@ -528,9 +622,14 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	DEVMEM_MEMDESC			*psRGXFWIfRuntimeCfgMemDesc;
 	RGXFWIF_RUNTIME_CFG		*psRGXFWIfRuntimeCfg;
 
-	/* Additional guest firmware memory context info */
-	DEVMEM_HEAP				*psGuestFirmwareRawHeap[RGX_NUM_OS_SUPPORTED];
-	DEVMEM_MEMDESC			*psGuestFirmwareRawMemDesc[RGX_NUM_OS_SUPPORTED];
+#if defined(SUPPORT_FW_HOST_SIDE_RECOVERY)
+	DEVMEM_MEMDESC			*psRGXFWIfActiveContextBufDesc;
+	RGXFWIF_ACTIVE_CONTEXT_BUF_DATA		*psRGXFWIfActiveContextBuf;
+#endif
+
+	/* Premapped firmware memory context info */
+	DEVMEM_HEAP				*psPremappedFwRawHeap[RGX_NUM_DRIVERS_SUPPORTED];
+	DEVMEM_MEMDESC			*psPremappedFwRawMemDesc[RGX_NUM_DRIVERS_SUPPORTED];
 
 #if defined(SUPPORT_WORKLOAD_ESTIMATION)
 	/* Array to store data needed for workload estimation when a workload
@@ -543,7 +642,8 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 #if defined(SUPPORT_PDVFS)
 	/**
 	 * Host memdesc and pointer to memory containing core clock rate in Hz.
-	 * Firmware updates the memory on changing the core clock rate over GPIO.
+	 * Firmware (PDVFS) updates the memory on changing the core clock rate over
+	 * GPIO.
 	 * Note: Shared memory needs atomic access from Host driver and firmware,
 	 * hence size should not be greater than memory transaction granularity.
 	 * Currently it is chosen to be 32 bits.
@@ -565,10 +665,12 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	                           *  and loss/freeing of FW & Host resources while in
 	                           *  use in another thread e.g. MSIR. */
 
-	IMG_UINT64  ui64HWPerfFilter; /*! Event filter for FW events (settable by AppHint) */
-	IMG_HANDLE  hHWPerfStream;    /*! TL Stream buffer (L2) for firmware event stream */
-	IMG_UINT32  ui32L2BufMaxPacketSize;/*!< Max allowed packet size in FW HWPerf TL (L2) buffer */
-	IMG_BOOL    bSuspendHWPerfL2DataCopy;  /*! Flag to indicate if copying HWPerf data is suspended */
+	IMG_UINT64  ui64HWPerfFilter[RGX_HWPERF_L2_STREAM_LAST];         /*! Event filter for FW events (settable by AppHint) */
+	IMG_HANDLE  hHWPerfStream[RGX_HWPERF_L2_STREAM_LAST];            /*! TL Stream buffer (L2) for firmware event stream */
+	IMG_UINT32  ui32L2BufMaxPacketSize[RGX_HWPERF_L2_STREAM_LAST];   /*! Max allowed packet size in FW HWPerf TL (L2) buffer */
+	IMG_BOOL    bSuspendHWPerfL2DataCopy[RGX_HWPERF_L2_STREAM_LAST]; /*! Flag to indicate if copying HWPerf data is suspended */
+	IMG_UINT64  ui64HWPerfFwFilter;                                  /*! Event filter for FW events created from OR-ing ui64HWPerfFilter values. */
+	IMG_UINT32  uiHWPerfStreamCount;                                 /*! Value indicating if any of the HWPerf streams has been created */
 
 	IMG_UINT32  ui32HWPerfHostFilter;      /*! Event filter for HWPerfHost stream (settable by AppHint) */
 	POS_LOCK    hLockHWPerfHostStream;     /*! Lock guarding access to HWPerfHost stream from multiple threads */
@@ -606,6 +708,7 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	IMG_UINT32				ui32GEOTimeoutsLastTime;
 	IMG_UINT32				ui32InterruptCountLastTime;
 	IMG_UINT32				ui32MissingInterruptsLastTime;
+	IMG_UINT32				ui32FWNonIdleTimeoutCount;
 
 	/* Client stall detection */
 	IMG_UINT32				ui32StalledClientMask;
@@ -626,7 +729,7 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 
 	/* If we do 10 deferred memory allocations per second, then the ID would wrap around after 13 years */
 	IMG_UINT32				ui32ZSBufferCurrID;	/*!< ID assigned to the next deferred devmem allocation */
-	IMG_UINT32				ui32FreelistCurrID;	/*!< ID assigned to the next freelist */
+	IMG_UINT64				ui64FreelistCurrID;	/*!< ID assigned to the next freelist */
 
 	POS_LOCK				hLockZSBuffer;		/*!< Lock to protect simultaneous access to ZSBuffers */
 	DLLIST_NODE				sZSBufferHead;		/*!< List of on-demand ZSBuffers */
@@ -648,28 +751,37 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	/* GPU DVFS Table */
 	RGX_GPU_DVFS_TABLE		*psGpuDVFSTable;
 
-	/* Pointer to function returning the GPU utilisation statistics since the last
-	 * time the function was called. Supports different users at the same time.
-	 *
-	 * psReturnStats [out]: GPU utilisation statistics (active high/active low/idle/blocked)
-	 *                      in microseconds since the last time the function was called
-	 *                      by a specific user (identified by hGpuUtilUser)
-	 *
-	 * Returns PVRSRV_OK in case the call completed without errors,
-	 * some other value otherwise.
+	/*
+	 * Pointer to function returning overall GPU usage as active time, total time
+	 * measured in nanoseconds as well as a percentage since the previous
+	 * function call. Does not sleep or block and can called from an interrupt
+	 * context. Saving all data in a given RGX_GPU_UTIL_STATS structure allows
+	 * multiple concurrent users to track the GPU utilisation at their own pace.
 	 */
-	PVRSRV_ERROR (*pfnGetGpuUtilStats) (PVRSRV_DEVICE_NODE *psDeviceNode,
-	                                    IMG_HANDLE hGpuUtilUser,
-	                                    RGXFWIF_GPU_UTIL_STATS *psReturnStats);
+	PVRSRV_ERROR (*pfnGetBasicGpuUtilStats) (PVRSRV_DEVICE_NODE *psDeviceNode,
+											RGX_GPU_UTIL_STATS *psReturnStats);
+
+	/*
+	 * Pointer to function returning the usage of every hardware Data Master
+	 * in the GPU as active time and total time measured in GPU timer ticks and
+	 * percentages categorised by VM/Hyperlane. The results reflect GPU usage
+	 * since the previous function call. The function requests data from the
+	 * Firmware and sleeps while waiting, can't be called from an interrupt.
+	 * Saving all data in a given RGX_GPU_UTIL_STATS structure allows
+	 * multiple concurrent users to track the GPU utilisation at their own pace.
+	 */
+	PVRSRV_ERROR (*pfnGetDetailedGpuUtilStats) (PVRSRV_DEVICE_NODE *psDeviceNode,
+												RGX_GPU_UTIL_STATS *psReturnStats);
 
 	/* Pointer to function that checks if the physical GPU IRQ
 	 * line has been asserted and clears it if so */
 	IMG_BOOL (*pfnRGXAckIrq) (struct _PVRSRV_RGXDEV_INFO_ *psDevInfo);
 
-	POS_LOCK				hGPUUtilLock;
+	POS_LOCK				hGPUUtilLock; /*!< Lock serialising access to the aaui32DmActiveTimeTicks
+											array from SysData in shared device memory */
 
 	/* Register configuration */
-	RGX_REG_CONFIG			sRegCongfig;
+	RGX_REG_CONFIG			sRegConfig;
 
 	IMG_BOOL				bRGXPowered;
 	DLLIST_NODE				sMemoryContextList;
@@ -702,12 +814,14 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	POS_LOCK				hDebugFaultInfoLock;	/*!< Lock to protect the debug fault info list */
 	POS_LOCK				hMMUCtxUnregLock;		/*!< Lock to protect list of unregistered MMU contexts */
 
+#if defined(RGX_FEATURE_MIPS_BIT_MASK)
 	POS_LOCK				hNMILock; /*!< Lock to protect NMI operations */
-
-#if defined(SUPPORT_VALIDATION)
-	IMG_UINT32				ui32ValidationFlags;	/*!< Validation flags for host driver */
 #endif
-	RGX_DUST_STATE			sDustReqState;
+
+#if defined(RGX_FEATURE_NUM_SPU_MAX_VALUE_IDX)
+	IMG_UINT32				ui32AvailablePowUnitsMask;
+	IMG_UINT32				ui32AvailableRACMask;
+#endif
 
 	RGX_LAYER_PARAMS		sLayerParams;
 
@@ -731,31 +845,16 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	IMG_UINT32				ui32FirmwareGcovSize;
 #endif
 
-#if defined(SUPPORT_VALIDATION) && defined(SUPPORT_SOC_TIMER)
-	struct
-	{
-		IMG_UINT64 ui64timerGray;
-		IMG_UINT64 ui64timerBinary;
-		IMG_UINT64 *pui64uscTimers;
-	} sRGXTimerValues;
+#if defined(RGX_FEATURE_MMU_VERSION_MAX_VALUE_IDX)
+	/* Value to store for each page size range config register in MMU4 */
+	IMG_UINT64				aui64MMUPageSizeRangeValue[RGX_MAX_NUM_MMU_PAGE_SIZE_RANGES];
 #endif
 
-#if defined(SUPPORT_VALIDATION)
-	struct
-	{
-		IMG_UINT64 ui64RegVal;
-		struct completion sRegComp;
-	} sFwRegs;
-#endif
+
 
 	IMG_HANDLE				hTQCLISharedMem;		/*!< TQ Client Shared Mem PMR */
 	IMG_HANDLE				hTQUSCSharedMem;		/*!< TQ USC Shared Mem PMR */
 
-#if defined(SUPPORT_VALIDATION)
-	IMG_UINT32				ui32TestSLRInterval; /* Don't enqueue an update sync checkpoint every nth kick */
-	IMG_UINT32				ui32TestSLRCount;    /* (used to test SLR operation) */
-	IMG_UINT32				ui32SLRSkipFWAddr;
-#endif
 
 #if defined(SUPPORT_SECURITY_VALIDATION)
 	DEVMEM_MEMDESC			*psRGXFWIfSecureBufMemDesc;
@@ -786,20 +885,39 @@ typedef struct _PVRSRV_RGXDEV_INFO_
 	IMG_UINT32				ui32HostSafetyEventMask;/*!< mask of the safety events handled by the driver */
 
 	RGX_CONTEXT_RESET_REASON	eLastDeviceError;	/*!< device error reported to client */
-#if defined(SUPPORT_VALIDATION)
-	IMG_UINT32 ui32ECCRAMErrInjModule;
-	IMG_UINT32 ui32ECCRAMErrInjInterval;
+
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+	PMR						*psGenHeapSecMem;		/*!< An allocation of secure memory mapped to
+													  the general devmem heap. The allocation is
+													  created and mapped at driver init. It's used for
+													  various purposes. See rgx_fwif_km.h for all use cases. */
 #endif
 
-	IMG_UINT32              ui32Log2Non4KPgSize; /* Page size of Non4k heap in log2 form */
-} PVRSRV_RGXDEV_INFO;
+	RGX_FWT_LOGTYPE			eDebugDumpFWTLogType;
 
+	RGX_FW_INFO_HEADER      sFWInfoHeader;
+#if defined(RGX_FEATURE_TFBC_LOSSY_37_PERCENT_BIT_MASK)
+	IMG_UINT32              ui32TFBCLossyGroup;     /*!< TFBCCompressionControlGroup
+													  setting for those cores which support
+													  this feature. */
+#endif
+
+	RGX_GPU_UTIL_STATS	sGpuUtilStats;			/*!< Gpu utilisation statistics data buffer */
+
+#if defined(SUPPORT_LINUX_DVFS)
+	RGX_GPU_UTIL_STATS	sDVFSGpuUtilStats;		/*!< DVFS gpu utilisation statistics data buffer */
+#endif
+
+} PVRSRV_RGXDEV_INFO;
 
 
 typedef struct _RGX_TIMING_INFORMATION_
 {
 	/*! GPU default core clock speed in Hz */
 	IMG_UINT32			ui32CoreClockSpeed;
+
+	/*! Default SOC clock speed in Hz */
+	IMG_UINT32			ui32SOCClockSpeed;
 
 	/*! Active Power Management: GPU actively requests the host driver to be powered off */
 	IMG_BOOL			bEnableActivePM;
@@ -818,11 +936,17 @@ typedef struct _RGX_DATA_
 	RGX_TIMING_INFORMATION	*psRGXTimingInfo;
 } RGX_DATA;
 
+typedef enum _RGX_QUERY_TIMESTAMP_TYPE_
+{
+	RGX_QUERY_HOST_TIMESTAMP,
+	RGX_QUERY_DEVICE_TIMESTAMP,
+	RGX_QUERY_SOC_TIMER,
+} RGX_QUERY_TIMESTAMP_TYPE;
+
 
 /*
 	RGX PDUMP register bank name (prefix)
 */
 #define RGX_PDUMPREG_NAME		"RGXREG"
-#define RGX_TB_PDUMPREG_NAME	"EMUREG"
 
 #endif /* RGXDEVICE_H */

@@ -55,13 +55,74 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgx_hwperf.h"
 
 #define PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST			0
-#define PVRSRV_BRIDGE_RGXHWPERF_RGXCTRLHWPERF			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+0
-#define PVRSRV_BRIDGE_RGXHWPERF_RGXGETHWPERFBVNCFEATUREFLAGS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+1
-#define PVRSRV_BRIDGE_RGXHWPERF_RGXCONFIGMUXHWPERFCOUNTERS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+2
-#define PVRSRV_BRIDGE_RGXHWPERF_RGXCONTROLHWPERFBLOCKS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+3
-#define PVRSRV_BRIDGE_RGXHWPERF_RGXCONFIGCUSTOMCOUNTERS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+4
-#define PVRSRV_BRIDGE_RGXHWPERF_RGXCONFIGUREHWPERFBLOCKS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+5
-#define PVRSRV_BRIDGE_RGXHWPERF_CMD_LAST			(PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+5)
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXGETCONFIGUREDHWPERFCOUNTERS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+0
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXGETENABLEDHWPERFBLOCKS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+1
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXGETHWPERFTIMESTAMP			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+2
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXCTRLHWPERF			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+3
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXGETHWPERFBVNCFEATUREFLAGS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+4
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXCONTROLHWPERFBLOCKS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+5
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXOPENHWPERFCLIENTSTREAM			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+6
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXCLOSEHWPERFCLIENTSTREAM			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+7
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXWRITEHWPERFCLIENTEVENT			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+8
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXCONFIGMUXHWPERFCOUNTERS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+9
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXCONFIGCUSTOMCOUNTERS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+10
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXCONFIGUREHWPERFBLOCKS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+11
+#define PVRSRV_BRIDGE_RGXHWPERF_RGXGETCONFIGUREDHWPERFMUXCOUNTERS			PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+12
+#define PVRSRV_BRIDGE_RGXHWPERF_CMD_LAST			(PVRSRV_BRIDGE_RGXHWPERF_CMD_FIRST+12)
+
+/*******************************************
+            RGXGetConfiguredHWPerfCounters
+ *******************************************/
+
+/* Bridge in structure for RGXGetConfiguredHWPerfCounters */
+typedef struct PVRSRV_BRIDGE_IN_RGXGETCONFIGUREDHWPERFCOUNTERS_TAG
+{
+	RGX_HWPERF_CONFIG_CNTBLK *psConfiguredCounters;
+	IMG_UINT32 ui32BlockID;
+} __packed PVRSRV_BRIDGE_IN_RGXGETCONFIGUREDHWPERFCOUNTERS;
+
+/* Bridge out structure for RGXGetConfiguredHWPerfCounters */
+typedef struct PVRSRV_BRIDGE_OUT_RGXGETCONFIGUREDHWPERFCOUNTERS_TAG
+{
+	RGX_HWPERF_CONFIG_CNTBLK *psConfiguredCounters;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_RGXGETCONFIGUREDHWPERFCOUNTERS;
+
+/*******************************************
+            RGXGetEnabledHWPerfBlocks
+ *******************************************/
+
+/* Bridge in structure for RGXGetEnabledHWPerfBlocks */
+typedef struct PVRSRV_BRIDGE_IN_RGXGETENABLEDHWPERFBLOCKS_TAG
+{
+	IMG_UINT32 *pui32EnabledBlockIDs;
+	IMG_UINT32 ui32ArrayLen;
+} __packed PVRSRV_BRIDGE_IN_RGXGETENABLEDHWPERFBLOCKS;
+
+/* Bridge out structure for RGXGetEnabledHWPerfBlocks */
+typedef struct PVRSRV_BRIDGE_OUT_RGXGETENABLEDHWPERFBLOCKS_TAG
+{
+	IMG_UINT32 *pui32EnabledBlockIDs;
+	PVRSRV_ERROR eError;
+	IMG_UINT32 ui32BlockCount;
+} __packed PVRSRV_BRIDGE_OUT_RGXGETENABLEDHWPERFBLOCKS;
+
+/*******************************************
+            RGXGetHWPerfTimeStamp
+ *******************************************/
+
+/* Bridge in structure for RGXGetHWPerfTimeStamp */
+typedef struct PVRSRV_BRIDGE_IN_RGXGETHWPERFTIMESTAMP_TAG
+{
+	IMG_UINT32 ui32EmptyStructPlaceholder;
+} __packed PVRSRV_BRIDGE_IN_RGXGETHWPERFTIMESTAMP;
+
+/* Bridge out structure for RGXGetHWPerfTimeStamp */
+typedef struct PVRSRV_BRIDGE_OUT_RGXGETHWPERFTIMESTAMP_TAG
+{
+	IMG_UINT64 ui64TimeStamp;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_RGXGETHWPERFTIMESTAMP;
 
 /*******************************************
             RGXCtrlHWPerf
@@ -71,8 +132,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 typedef struct PVRSRV_BRIDGE_IN_RGXCTRLHWPERF_TAG
 {
 	IMG_UINT64 ui64Mask;
-	IMG_BOOL bToggle;
 	IMG_UINT32 ui32StreamId;
+	IMG_BOOL bToggle;
 } __packed PVRSRV_BRIDGE_IN_RGXCTRLHWPERF;
 
 /* Bridge out structure for RGXCtrlHWPerf */
@@ -99,6 +160,75 @@ typedef struct PVRSRV_BRIDGE_OUT_RGXGETHWPERFBVNCFEATUREFLAGS_TAG
 } __packed PVRSRV_BRIDGE_OUT_RGXGETHWPERFBVNCFEATUREFLAGS;
 
 /*******************************************
+            RGXControlHWPerfBlocks
+ *******************************************/
+
+/* Bridge in structure for RGXControlHWPerfBlocks */
+typedef struct PVRSRV_BRIDGE_IN_RGXCONTROLHWPERFBLOCKS_TAG
+{
+	IMG_UINT16 *pui16BlockIDs;
+	IMG_UINT32 ui32ArrayLen;
+	IMG_BOOL bEnable;
+} __packed PVRSRV_BRIDGE_IN_RGXCONTROLHWPERFBLOCKS;
+
+/* Bridge out structure for RGXControlHWPerfBlocks */
+typedef struct PVRSRV_BRIDGE_OUT_RGXCONTROLHWPERFBLOCKS_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_RGXCONTROLHWPERFBLOCKS;
+
+/*******************************************
+            RGXOpenHWPerfClientStream
+ *******************************************/
+
+/* Bridge in structure for RGXOpenHWPerfClientStream */
+typedef struct PVRSRV_BRIDGE_IN_RGXOPENHWPERFCLIENTSTREAM_TAG
+{
+	IMG_UINT32 ui32EmptyStructPlaceholder;
+} __packed PVRSRV_BRIDGE_IN_RGXOPENHWPERFCLIENTSTREAM;
+
+/* Bridge out structure for RGXOpenHWPerfClientStream */
+typedef struct PVRSRV_BRIDGE_OUT_RGXOPENHWPERFCLIENTSTREAM_TAG
+{
+	IMG_HANDLE hSD;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_RGXOPENHWPERFCLIENTSTREAM;
+
+/*******************************************
+            RGXCloseHWPerfClientStream
+ *******************************************/
+
+/* Bridge in structure for RGXCloseHWPerfClientStream */
+typedef struct PVRSRV_BRIDGE_IN_RGXCLOSEHWPERFCLIENTSTREAM_TAG
+{
+	IMG_HANDLE hSD;
+} __packed PVRSRV_BRIDGE_IN_RGXCLOSEHWPERFCLIENTSTREAM;
+
+/* Bridge out structure for RGXCloseHWPerfClientStream */
+typedef struct PVRSRV_BRIDGE_OUT_RGXCLOSEHWPERFCLIENTSTREAM_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_RGXCLOSEHWPERFCLIENTSTREAM;
+
+/*******************************************
+            RGXWriteHWPerfClientEvent
+ *******************************************/
+
+/* Bridge in structure for RGXWriteHWPerfClientEvent */
+typedef struct PVRSRV_BRIDGE_IN_RGXWRITEHWPERFCLIENTEVENT_TAG
+{
+	IMG_HANDLE hSD;
+	IMG_BYTE *pui8Data;
+	IMG_UINT32 ui32Size;
+} __packed PVRSRV_BRIDGE_IN_RGXWRITEHWPERFCLIENTEVENT;
+
+/* Bridge out structure for RGXWriteHWPerfClientEvent */
+typedef struct PVRSRV_BRIDGE_OUT_RGXWRITEHWPERFCLIENTEVENT_TAG
+{
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_RGXWRITEHWPERFCLIENTEVENT;
+
+/*******************************************
             RGXConfigMuxHWPerfCounters
  *******************************************/
 
@@ -114,24 +244,6 @@ typedef struct PVRSRV_BRIDGE_OUT_RGXCONFIGMUXHWPERFCOUNTERS_TAG
 {
 	PVRSRV_ERROR eError;
 } __packed PVRSRV_BRIDGE_OUT_RGXCONFIGMUXHWPERFCOUNTERS;
-
-/*******************************************
-            RGXControlHWPerfBlocks
- *******************************************/
-
-/* Bridge in structure for RGXControlHWPerfBlocks */
-typedef struct PVRSRV_BRIDGE_IN_RGXCONTROLHWPERFBLOCKS_TAG
-{
-	IMG_UINT16 *pui16BlockIDs;
-	IMG_BOOL bEnable;
-	IMG_UINT32 ui32ArrayLen;
-} __packed PVRSRV_BRIDGE_IN_RGXCONTROLHWPERFBLOCKS;
-
-/* Bridge out structure for RGXControlHWPerfBlocks */
-typedef struct PVRSRV_BRIDGE_OUT_RGXCONTROLHWPERFBLOCKS_TAG
-{
-	PVRSRV_ERROR eError;
-} __packed PVRSRV_BRIDGE_OUT_RGXCONTROLHWPERFBLOCKS;
 
 /*******************************************
             RGXConfigCustomCounters
@@ -168,5 +280,23 @@ typedef struct PVRSRV_BRIDGE_OUT_RGXCONFIGUREHWPERFBLOCKS_TAG
 {
 	PVRSRV_ERROR eError;
 } __packed PVRSRV_BRIDGE_OUT_RGXCONFIGUREHWPERFBLOCKS;
+
+/*******************************************
+            RGXGetConfiguredHWPerfMuxCounters
+ *******************************************/
+
+/* Bridge in structure for RGXGetConfiguredHWPerfMuxCounters */
+typedef struct PVRSRV_BRIDGE_IN_RGXGETCONFIGUREDHWPERFMUXCOUNTERS_TAG
+{
+	RGX_HWPERF_CONFIG_MUX_CNTBLK *psConfiguredMuxCounters;
+	IMG_UINT32 ui32BlockID;
+} __packed PVRSRV_BRIDGE_IN_RGXGETCONFIGUREDHWPERFMUXCOUNTERS;
+
+/* Bridge out structure for RGXGetConfiguredHWPerfMuxCounters */
+typedef struct PVRSRV_BRIDGE_OUT_RGXGETCONFIGUREDHWPERFMUXCOUNTERS_TAG
+{
+	RGX_HWPERF_CONFIG_MUX_CNTBLK *psConfiguredMuxCounters;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_RGXGETCONFIGUREDHWPERFMUXCOUNTERS;
 
 #endif /* COMMON_RGXHWPERF_BRIDGE_H */

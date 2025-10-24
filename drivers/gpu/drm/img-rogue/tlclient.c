@@ -105,7 +105,7 @@ typedef struct _TL_STREAM_DESC_
 	IMG_UINT32 ui32WritesFailed;
 
 	/* Name of the stream. */
-	IMG_CHAR szName[PRVSRVTL_MAX_STREAM_NAME_SIZE];
+	IMG_CHAR szName[PVRSRVTL_MAX_STREAM_NAME_SIZE];
 } TL_STREAM_DESC, *PTL_STREAM_DESC;
 
 
@@ -174,7 +174,7 @@ PVRSRV_ERROR TLClientOpenStream(SHARED_DEV_CONNECTION hDevConnection,
 			hTLImportHandle);
 
 	/* Copy stream name */
-	OSStringLCopy(psSD->szName, pszName, PRVSRVTL_MAX_STREAM_NAME_SIZE);
+	OSStringSafeCopy(psSD->szName, pszName, PVRSRVTL_MAX_STREAM_NAME_SIZE);
 
 	/* Return client descriptor handle to caller */
 	*phSD = psSD;
@@ -254,7 +254,7 @@ PVRSRV_ERROR TLClientCloseStream(SHARED_DEV_CONNECTION hDevConnection,
 IMG_INTERNAL
 PVRSRV_ERROR TLClientDiscoverStreams(SHARED_DEV_CONNECTION hDevConnection,
 		const IMG_CHAR *pszNamePattern,
-		IMG_CHAR aszStreams[][PRVSRVTL_MAX_STREAM_NAME_SIZE],
+		IMG_CHAR aszStreams[][PVRSRVTL_MAX_STREAM_NAME_SIZE],
 		IMG_UINT32 *pui32NumFound)
 {
 	PVR_ASSERT(hDevConnection);
@@ -264,7 +264,7 @@ PVRSRV_ERROR TLClientDiscoverStreams(SHARED_DEV_CONNECTION hDevConnection,
 	return BridgeTLDiscoverStreams(GetBridgeHandle(hDevConnection),
 			pszNamePattern,
 			/* we need to treat this as one dimensional array */
-			*pui32NumFound * PRVSRVTL_MAX_STREAM_NAME_SIZE,
+			*pui32NumFound * PVRSRVTL_MAX_STREAM_NAME_SIZE,
 			(IMG_CHAR *) aszStreams,
 			pui32NumFound);
 }
@@ -373,8 +373,7 @@ PVRSRV_ERROR TLClientAcquireData(SHARED_DEV_CONNECTION hDevConnection,
 	if (eError != PVRSRV_OK)
 	{
 		/* Mask reporting of the errors seen under normal operation */
-		if ((eError != PVRSRV_ERROR_RESOURCE_UNAVAILABLE) &&
-			(eError != PVRSRV_ERROR_TIMEOUT) &&
+		if ((eError != PVRSRV_ERROR_TIMEOUT) &&
 			(eError != PVRSRV_ERROR_STREAM_READLIMIT_REACHED))
 		{
 			PVR_LOG_ERROR(eError, "BridgeTLAcquireData");

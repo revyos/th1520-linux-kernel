@@ -61,7 +61,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  @Description   Open a descriptor onto an existing kernel transport stream.
  @Input         hDevConnection  Address of a pointer to a connection object
  @Input         pszName         Address of the stream name string, no longer
-                                than PRVSRVTL_MAX_STREAM_NAME_SIZE.
+                                than PVRSRVTL_MAX_STREAM_NAME_SIZE.
  @Input         ui32Mode        Unused
  @Output        phSD            Address of a pointer to an stream object
  @Return        PVRSRV_ERROR_NOT_FOUND          when named stream not found
@@ -109,7 +109,7 @@ PVRSRV_ERROR TLClientCloseStream(SHARED_DEV_CONNECTION hDevConnection,
 IMG_INTERNAL
 PVRSRV_ERROR TLClientDiscoverStreams(SHARED_DEV_CONNECTION hDevConnection,
 		const IMG_CHAR *pszNamePattern,
-		IMG_CHAR aszStreams[][PRVSRVTL_MAX_STREAM_NAME_SIZE],
+		IMG_CHAR aszStreams[][PVRSRVTL_MAX_STREAM_NAME_SIZE],
 		IMG_UINT32 *pui32NumFound);
 
 /*************************************************************************/ /*!

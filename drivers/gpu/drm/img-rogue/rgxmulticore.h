@@ -48,7 +48,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv_error.h"
 #include "pvrsrv.h"
 
-PVRSRV_ERROR RGXInitMultiCoreInfo(PVRSRV_DEVICE_NODE *psDeviceNode);
-void RGXDeInitMultiCoreInfo(PVRSRV_DEVICE_NODE *psDeviceNode);
+PVRSRV_ERROR RGXInitDeviceInfo(PVRSRV_DEVICE_NODE *psDeviceNode);
+void RGXDeInitDeviceInfo(PVRSRV_DEVICE_NODE *psDeviceNode);
 
 #endif /* RGXMULTICORE_H */

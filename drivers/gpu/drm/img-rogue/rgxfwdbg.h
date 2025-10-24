@@ -80,18 +80,45 @@ PVRSRVRGXFWDebugSetHCSDeadlineKM(
 	IMG_UINT32  ui32HCSDeadlineMS);
 
 PVRSRV_ERROR
-PVRSRVRGXFWDebugSetOSidPriorityKM(
+PVRSRVRGXFWDebugSetDriverTimeSliceKM(
 	CONNECTION_DATA *psConnection,
 	PVRSRV_DEVICE_NODE *psDeviceNode,
-	IMG_UINT32  ui32OSid,
-	IMG_UINT32  ui32OSidPriority);
+	IMG_UINT32  ui32DriverID,
+	IMG_UINT32  ui32TSPercentage);
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugSetDriverTimeSliceIntervalKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode,
+	IMG_UINT32  ui32TSIntervalMs);
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugSetDriverPriorityKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode,
+	IMG_UINT32  ui32DriverID,
+	IMG_INT32   i32DriverPriority);
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugSetDriverIsolationGroupKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode,
+	IMG_UINT32  ui32DriverID,
+	IMG_UINT32  ui32DriverIsolationGroup);
 
 PVRSRV_ERROR
 PVRSRVRGXFWDebugSetOSNewOnlineStateKM(
 	CONNECTION_DATA *psConnection,
 	PVRSRV_DEVICE_NODE *psDeviceNode,
-	IMG_UINT32  ui32OSid,
+	IMG_UINT32  ui32DriverID,
 	IMG_UINT32  ui32OSNewState);
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugMapGuestHeapKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode,
+	IMG_UINT32 ui32DriverID,
+	IMG_UINT64 ui64GuestHeapBase);
 
 PVRSRV_ERROR
 PVRSRVRGXFWDebugPHRConfigureKM(
@@ -110,4 +137,24 @@ PVRSRVRGXFWDebugDumpFreelistPageListKM(
 	CONNECTION_DATA * psConnection,
 	PVRSRV_DEVICE_NODE *psDeviceNode);
 
+PVRSRV_ERROR
+PVRSRVRGXFWDebugInjectFaultKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode);
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugPowerOffKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode);
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugPowerOnKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode);
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugSetVzConnectionCooldownPeriodInSecKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode,
+	IMG_UINT32  ui32VzConnectionCooldownPeriodInSec);
 #endif
