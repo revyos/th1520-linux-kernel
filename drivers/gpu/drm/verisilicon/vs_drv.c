@@ -41,7 +41,7 @@
 
 
 
-#define DRV_NAME    "vs-drm"
+#define DRV_NAME    "vs_drm"
 #define DRV_DESC    "VeriSilicon DRM driver"
 #define DRV_DATE    "20191101"
 #define DRV_MAJOR   1
