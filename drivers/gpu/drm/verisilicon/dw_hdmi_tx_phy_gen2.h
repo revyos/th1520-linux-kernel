@@ -618,6 +618,9 @@ dw_hdmi_tx_phy_gen2_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
 	if ((max_height > 0) && (mode->vdisplay > max_height))
 		return MODE_V_ILLEGAL;
 
+	if (mode->clock >= 543000 && mode->clock < 544000)
+		return MODE_CLOCK_RANGE;
+
 	for (i = 0; i < ARRAY_SIZE(mpll_configs); i++) {
 		if (mode->clock <= mpll_configs[i].pixelclock)
 			return MODE_OK;
