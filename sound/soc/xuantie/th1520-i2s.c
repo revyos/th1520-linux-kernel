@@ -649,15 +649,20 @@ static ssize_t th1520_i2s_show(struct device *dev, struct device_attribute *attr
         u32 value, i;
         struct th1520_i2s_priv *priv = dev_get_drvdata(dev);
 
-        for (i = I2S_IISEN; i <= I2S_DR4; i+=0x4) {
+	for (i = I2S_IISEN; i <= I2S_DR4; i += 0x4) {
 			value = readl(priv->regs + i);
 			printk("i2s reg[0x%x]=0x%x\n", i, value);
         }
 
-        for (i = 0; i <= 0xfc ; i+=0x4) {
+	if (priv->audio_cpr_regmap && !IS_ERR(priv->audio_cpr_regmap)) {
+		for (i = 0; i <= 0xfc; i += 0x4) {
 			regmap_read(priv->audio_cpr_regmap,  i, &value);
 			printk("cpr reg[0x%x]=0x%x\n", i, value);
-        }
+		}
+	} else {
+		/* Skip reading on devices with no CPR regmap */
+		printk("No CPR regmap for %s\n", priv->name);
+	}
 
         return 0;
 }
