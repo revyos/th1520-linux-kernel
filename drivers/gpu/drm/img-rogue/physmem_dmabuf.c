@@ -1901,21 +1901,13 @@ PhysmemExportDmaBuf(CONNECTION_DATA *psConnection,
 	PVRSRV_MEMALLOCFLAGS_T ui64Flags = 0;
 	IMG_BOOL bIsPMRReadable = IMG_FALSE;
 	IMG_BOOL bIsPMRWritable = IMG_FALSE;
-
-	/* Exporting a PMR which was originally created from an imported DmaBuf
-	 * is not supported.
-	 */
-	PVR_RETURN_IF_FALSE(PMR_GetType(psPMR) != PMR_TYPE_DMABUF,
-	                    PVRSRV_ERROR_PMR_WRONG_PMR_TYPE);
+	IMG_BOOL bIsExternalDmaBuf = IMG_FALSE;
 
 	eError = PMR_IsExportable(psPMR);
 	PVR_LOG_RETURN_IF_ERROR(eError, "PMR_IsExportable");
 
 	eError = PhysmemGetOrCreatePMRWrapper(psPMR, &psPMRWrapper);
 	PVR_LOG_GOTO_IF_ERROR(eError, "PhysmemExportDmaBuf", fail_get_pmr_wrapper);
-
-	eError = PMRRefPMR(psPMR);
-	PVR_LOG_GOTO_IF_ERROR(eError, "PMRRefPMR", fail_ref_pmr);
 
 	/*
 	 * To avoid compatibility issue, CPU and GPU R/W flags are combined to determine
@@ -1947,8 +1939,16 @@ PhysmemExportDmaBuf(CONNECTION_DATA *psConnection,
 		iDmaBufFlags = O_RDONLY;
 	}
 
-	{
+	if (PMR_GetType(psPMR) == PMR_TYPE_DMABUF) {
+		psDmaBuf = PhysmemGetDmaBuf(psPMR);
+		PVR_RETURN_IF_FALSE(psDmaBuf != NULL, PVRSRV_ERROR_PMR_WRONG_PMR_TYPE);
+		get_dma_buf(psDmaBuf);
+		bIsExternalDmaBuf = IMG_TRUE;
+	} else {
 		DEFINE_DMA_BUF_EXPORT_INFO(sDmaBufExportInfo);
+
+		eError = PMRRefPMR(psPMR);
+		PVR_LOG_GOTO_IF_ERROR(eError, "PMRRefPMR", fail_ref_pmr);
 
 		sDmaBufExportInfo.priv  = psPMRWrapper;
 		sDmaBufExportInfo.ops   = &sPVRDmaBufOps;
@@ -1985,7 +1985,8 @@ fail_dma_buf:
 	return eError;
 
 fail_export:
-	(void) PMRUnrefPMR(psPMR);
+	if (!bIsExternalDmaBuf)
+		(void) PMRUnrefPMR(psPMR);
 
 fail_ref_pmr:
 	/* No need to destroy psPMRWrapper here. It will be (or already was)
